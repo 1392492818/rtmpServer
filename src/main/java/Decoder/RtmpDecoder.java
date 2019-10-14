@@ -281,7 +281,7 @@ public class RtmpDecoder extends ByteToMessageDecoder {
             for(byte i : timeByte){
                 S2.add(i);
             }
-            for(int i = 8; i <= Common.C1_LENGTH;i++) {
+            for(int i = 8; i < Common.C1_LENGTH;i++) {
                 S2.add(handshakeData.get(i));
             }
             ctx.writeAndFlush(Unpooled.copiedBuffer(Common.conversionByteArray(S2)));
