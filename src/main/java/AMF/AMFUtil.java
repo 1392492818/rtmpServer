@@ -109,6 +109,9 @@ public class AMFUtil {
             }
 
         }
+        data.add((byte) 0x00);
+        data.add((byte) 0x00);
+        data.add((byte) 0x09);
         return  Common.conversionByteArray(data);
     }
 

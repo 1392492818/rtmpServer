@@ -61,6 +61,7 @@ public class RtmpDecoder extends ByteToMessageDecoder {
             for(byte i: data){
                 chunkData.add(i);
             }
+            System.out.println("接收到的数据大小" + chunkData.size());
             byte flags = chunkData.get(0);
             int[]  chunk_head_length = {12,8,4,1}; //对应的 chunk head length 长度
             int fmt = flags >> 6; //向右移动 6 位 获取 fmt
@@ -114,18 +115,17 @@ public class RtmpDecoder extends ByteToMessageDecoder {
             }
             System.out.println(chunkData.size());
             System.out.println(chunkMessage.size());
-            System.out.println(Common.bytes2hex(Common.conversionByteArray(chunkMessage)));
-            handMessage(Common.conversionByteArray(chunkMessage));
+            System.out.println(Common.bytes2hex(Common.conversionByteArray(chunkData)));
+            handMessage(Common.conversionByteArray(chunkMessage),ctx);
         }
     }
 
-    private void handMessage(byte[] message) {
+    private void handMessage(byte[] message,ChannelHandlerContext ctx) {
         AMFClass amfClass = new AMFClass();
         amfClass.message = message;
         amfClass.pos = 0;
         switch (msgType) {
             case 0x14:
-
                 System.out.println("消息控制服务");
                 String msg = AMFUtil.load_amf_string(amfClass);
                 System.out.println(msg);
@@ -135,12 +135,71 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                     if(data.containsKey("app")) {
                         String app = data.get("app").toString();
                         if(app.equals(Common.APP_NAME)) {
-//                            List<Byte> reslu
-//                            amf_write(&invoke, std::string("_result"));
-//                            amf_write(&invoke, txid);
-//                            amf_write(&invoke, reply);
-//                            amf_write(&invoke, status);
-//                            rtmp_send(client, MSG_INVOKE, CONTROL_ID, invoke.buf, 0, CHAN_RESULT);
+                            List<Byte> result = new ArrayList<Byte>();
+                            byte[] resultString = AMFUtil.writeString("_result");
+                            System.out.println(Common.bytes2hex(resultString));
+                            for(byte i: resultString){
+                                result.add(i);
+                            }
+                            byte[] resultNumber = AMFUtil.writeNumber(txid);
+                            System.out.println(Common.bytes2hex(resultNumber));
+                            for(byte i: resultNumber){
+                                result.add(i);
+                            }
+                            Map<String,Object> version = new HashMap<String, Object>();
+                            double capabilities = 255.0;
+                            double mode = 1.0;
+                            version.put("fmsVer","FMS/4,5,1,484");
+                            version.put("capabilities",capabilities);
+                            version.put("mode",mode);
+                            byte[] versionByte = AMFUtil.writeObject(version);
+                            System.out.println(Common.bytes2hex(versionByte));
+                            for(byte i: versionByte){
+                                result.add(i);
+                            }
+
+                            Map<String,Object> status = new HashMap<String, Object>();
+                            double objectEncoding = 3.0;
+                            status.put("level","status");
+                            status.put("code","NetConnection.Connect.Success");
+                            status.put("description","Connection succeeded.");
+                            status.put("objectEncoding",objectEncoding);
+                            byte[] statusVersion = AMFUtil.writeObject(status);
+                            //System.out.println(Common.bytes2hex(statusVersion));
+                            for(byte i: statusVersion){
+                                result.add(i);
+                            }
+                            List<Byte> rtmpHead = new ArrayList<Byte>();
+                            byte flags = (3 & 0x3f) | (0 << 6);
+                            rtmpHead.add(flags);
+                            //System.out.println(flags);
+
+                            byte[] timestamp = {0x00,0x00,0x00};
+                            for(byte i: timestamp){
+                                rtmpHead.add(i);
+                            }
+                            int msg_len = result.size();
+                            //System.out.println(msg_len);
+                            byte[] msgLength = Common.intToByte(msg_len);
+                            rtmpHead.add(msgLength[2]);
+                            rtmpHead.add(msgLength[1]);
+                            rtmpHead.add(msgLength[0]);
+                            byte msg_type = 0x14;
+                            rtmpHead.add(msg_type);
+                            rtmpHead.add((byte) 0x00);
+                            rtmpHead.add((byte) 0x00);
+                            rtmpHead.add((byte) 0x00);
+                            rtmpHead.add((byte) 0x00);
+                            List<Byte> chunk = new ArrayList<Byte>();
+                            for(int i = 0; i < rtmpHead.size(); i++){
+                                chunk.add(rtmpHead.get(i));
+                            }
+                            for(int i = 0; i < result.size();i++){
+                                chunk.add(result.get(i));
+                            }
+                            System.out.println(chunk.size());
+                            ctx.writeAndFlush(Unpooled.copiedBuffer(Common.conversionByteArray(chunk)));
+                            System.out.println(Common.bytes2hex(Common.conversionByteArray(chunk)));
                         }
                     }
                 }
@@ -234,16 +293,16 @@ public class RtmpDecoder extends ByteToMessageDecoder {
 //            for(int i = 1537;i < handshakeData.size();i++) {
 //                c2List.add(handshakeData.get(i));
 //            }
-//
+
 //            System.out.println("接受到的握手数据");
-////            System.out.println(handshakeData.size());
-////            System.out.println("C1");
-////            System.out.println(Common.bytes2hex(Common.conversionByteArray(c1List)));
-////            System.out.println("C2");
+//            System.out.println(handshakeData.size());
+//            System.out.println("C1");
+//            System.out.println(Common.bytes2hex(Common.conversionByteArray(c1List)));
+//            System.out.println("C2");
 //            System.out.println(c2List.size());
 //            System.out.println(Common.bytes2hex(Common.conversionByteArray(c2List)));
-
-         //   System.out.println(Common.bytes2hex(Common.conversionByteArray(handshakeData)));
+//
+//            System.out.println(Common.bytes2hex(Common.conversionByteArray(handshakeData)));
 
         }
     }
