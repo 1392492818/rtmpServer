@@ -194,8 +194,20 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                             for(int i = 0; i < rtmpHead.size(); i++){
                                 chunk.add(rtmpHead.get(i));
                             }
-                            for(int i = 0; i < result.size();i++){
-                                chunk.add(result.get(i));
+                            int maxChunkSize = 128;
+                            int pos = 0;
+                            while(pos < result.size()){
+                               if(result.size() - pos < maxChunkSize){
+                                   for(int i = pos; i < result.size();i++){
+                                       chunk.add(result.get(i));
+                                   }
+                               } else {
+                                   for(int i = pos; i < pos + 128;i++) {
+                                       chunk.add(result.get(i));
+                                   }
+                                   chunk.add((byte) ((3 & 0x3f) | (3 << 6)));
+                               }
+                                pos += 128;
                             }
                             System.out.println(chunk.size());
                             ctx.writeAndFlush(Unpooled.copiedBuffer(Common.conversionByteArray(chunk)));
