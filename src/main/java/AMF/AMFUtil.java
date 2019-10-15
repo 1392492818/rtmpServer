@@ -187,6 +187,14 @@ public class AMFUtil {
     }
 
     /**
+     * amf null 写入方法
+     * @return
+     */
+    public static byte writeNull() {
+        return AMF.Null;
+    }
+
+    /**
      * 提取 amf 里面的 boolean
      * @param amfClass
      * @return
@@ -256,12 +264,29 @@ public class AMFUtil {
         return Common.bytesToDouble(Common.reverseArray(number));
     }
 
+
+//    public static Object load_amf_value(AMFClass amfClass){
+//        byte type = amfClass.message[amfClass.pos];
+//        switch (type) {
+//            case AMF.Number:
+//                return load_amf_number(amfClass);
+//            case AMF.String:
+//                return load_amf_string(amfClass);
+//            case AMF.UntypedObject:
+//                return load_amf_object(amfClass);
+//            case AMF.Boolean:
+//                return load_amf_boolean(amfClass);
+//                default:
+//                    System.out.println("其他消息" + type);
+//                    return null;
+//        }
+//    }
     /**
      * 解析 object value
      * @param amfClass
      * @return
      */
-    public static Object load_amf_value(AMFClass amfClass){
+    public static Object load_amf(AMFClass amfClass) {
         byte type = amfClass.message[amfClass.pos];
         switch (type) {
             case AMF.Number:
@@ -272,11 +297,15 @@ public class AMFUtil {
                 return load_amf_object(amfClass);
             case AMF.Boolean:
                 return load_amf_boolean(amfClass);
-                default:
-                    System.out.println("其他消息" + type);
-                    return null;
+            case AMF.Null:
+                amfClass.pos++;
+                return null;
+            default:
+                System.out.println("其他消息" + type);
+                return null;
         }
     }
+
     /**
      * 解析 amf object  数据
      * @param amfClass
@@ -294,9 +323,9 @@ public class AMFUtil {
             if(key.length() == 0){
                 break;
             }
-            Object value = load_amf_value(amfClass);
+            Object value = load_amf(amfClass);
             amfData.put(key,value);
-            System.out.println(key +"==="+value);
+//            System.out.println(key +"==="+value);
         }
         System.out.println(amfClass.pos);
         amfClass.pos += 1;// object 最后 结束为 00 00 09 取到最后是00 所以 +1 跳过 09 这个 字节

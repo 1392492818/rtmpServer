@@ -1,6 +1,7 @@
 package Util;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 
 /**
@@ -26,10 +27,13 @@ public class Common {
     public static int MESSAGE_PAYLOAD_LENGTH = 3;
     public static int MESSAGE_TIMESTAMP_LENGTH = 4;
     public static int MESSAGE_STREAM_ID_LENGTH = 3;
+    public static int DEFAULT_CHUNK_MESSAGE_LENGTH = 128;
+    public static double STREAM_ID = 1337;
     // AMF
     public static int AFM_TYPE_LENGTH = 1; // afm 数据类型长度
     public static int AFM_DATA_LENGTH = 2; // afm 表示一个数据的长度
     public static int AFM_NUMBER_LENGTH = 8; //afm 一个 number 的长度，其实为 double
+
 
     public static String APP_NAME = "live";
 
@@ -197,6 +201,23 @@ public class Common {
             new_array[i] = Array[Array.length - i - 1];
         }
         return new_array;
+    }
+
+    /**
+     * 删除元素
+     * @param data
+     * @param start
+     * @param end
+     */
+    public static List<Byte> removeList(List<Byte> data,int start,int end) {
+        List<Byte> newData = new ArrayList<Byte>();
+        for(int i = 0; i < data.size();i++) {
+            if(i < start || i > end){
+                newData.add(data.get(i));
+            }
+              // 删除元素后，需要把下标减一。这是因为在每次删除元素后，ArrayList会将后面部分的元素依次往上挪一个位置(就是copy)，所以，下一个需要访问的下标还是当前下标，所以必须得减一才能把所有元素都遍历完
+        }
+        return newData;
     }
 
 }

@@ -61,13 +61,25 @@ public class RtmpDecoder extends ByteToMessageDecoder {
             for(byte i: data){
                 chunkData.add(i);
             }
-            System.out.println("接收到的数据大小" + chunkData.size());
-            byte flags = chunkData.get(0);
-            int[]  chunk_head_length = {12,8,4,1}; //对应的 chunk head length 长度
-            int fmt = flags >> 6; //向右移动 6 位 获取 fmt
-            int csidTS = flags & 0x3f; // 按位与 11 为 1 ，有0 为 0
+            handChunkMessage(chunkData,ctx);
 
-            int head_len = chunk_head_length[fmt];
+        }
+    }
+
+    /**
+     * 解析chunkMessage 数据
+     * @param chunkData
+     * @param ctx
+     */
+    private void handChunkMessage(List<Byte> chunkData,ChannelHandlerContext ctx) {
+      //  System.out.println(Common.bytes2hex(Common.conversionByteArray(chunkData)));
+        byte flags = chunkData.get(0);
+        int[]  chunk_head_length = {12,8,4,1}; //对应的 chunk head length 长度
+        int fmt = flags >> 6; //向右移动 6 位 获取 fmt
+        System.out.println("fmt === " + fmt);
+        int csidTS = flags & 0x3f; // 按位与 11 为 1 ，有0 为 0
+        try{
+             int head_len = chunk_head_length[fmt];
             int basic_head_len = chunkHeadIndex = getBasicHeadLength(csidTS);
             byte[] chunkDataByte = Common.conversionByteArray(chunkData);
 
@@ -85,10 +97,13 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                 byte[] msg_len = new byte[Common.TIMESTAMP_BYTE_LENGTH];
                 System.arraycopy(chunkDataByte,chunkHeadIndex,msg_len,0,Common.MSG_LEN_LENGTH);
                 this.msgLength = Common.byteToInt24(msg_len);
-                if(this.msgLength > chunkData.size()) {
-                    System.out.println("数据不全");
-                    ctx.close();
+                if(this.msgLength > chunkData.size()) { //后面分包的情况,这方法可能有问题
+                    System.out.println("101 数据不全");
+                    System.out.println(Common.bytes2hex(Common.conversionByteArray(chunkData)));
+                    //ctx.close();
                 }
+
+
                 System.out.println("msg len " + this.msgLength);
                 chunkHeadIndex = chunkHeadIndex + Common.TIMESTAMP_BYTE_LENGTH;
 
@@ -101,7 +116,7 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                 byte[] streamByte = new byte[Common.STREAM_ID_LENGTH];
                 System.arraycopy(chunkDataByte,chunkHeadIndex,streamByte,0,Common.STREAM_ID_LENGTH);
                 this.streamId = Common.byteSmallToInt(streamByte); //只有 stream 是小端模式
-                System.out.println("streamId" + streamId);
+                System.out.println("streamId === " + streamId);
                 chunkHeadIndex = chunkHeadIndex + Common.STREAM_ID_LENGTH;
             }
             if(isExtendedTimestamp) {
@@ -110,14 +125,31 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                 this.timestamp = Common.byteToInt24(timestampByte);
                 chunkHeadIndex = chunkHeadIndex + Common.EXTEND_TIMESTAMP_LENGTH;
             }
-            for(int i = chunkHeadIndex;i < chunkData.size(); i++) {
+            int msgIndex = msgLength > Common.DEFAULT_CHUNK_MESSAGE_LENGTH ? chunkHeadIndex + Common.DEFAULT_CHUNK_MESSAGE_LENGTH: chunkHeadIndex + msgLength;
+
+            for(int i = chunkHeadIndex;i < msgIndex; i++) {
                 chunkMessage.add(chunkData.get(i));
             }
+            System.out.println("chunkMessage size " + chunkMessage.size() + " msgLength " + msgLength + " msg index " + msgIndex);
+            if(chunkMessage.size() < msgLength){ //还没有提取完所有数据
+                msgLength = msgLength - chunkMessage.size();
+            } else {
+                handMessage(Common.conversionByteArray(chunkMessage),ctx); //这里还没有处理到分包的情况
+                isExtendedTimestamp = false;
+                chunkMessage = new ArrayList<Byte>();
+                System.out.println(msgIndex);
+            }
+            chunkHeadIndex = 0;
+            chunkData = Common.removeList(chunkData,0,msgIndex - 1); // 如果chunkData 还有数据，粘包了，那么解析就好了
             System.out.println(chunkData.size());
-            System.out.println(chunkMessage.size());
+            if(chunkData.size() > 0) { //如果还有数据，那么继续解析就好了
+                handChunkMessage(chunkData,ctx);
+            }
+        }catch (Exception e) {
+            ctx.close();
             System.out.println(Common.bytes2hex(Common.conversionByteArray(chunkData)));
-            handMessage(Common.conversionByteArray(chunkMessage),ctx);
         }
+
     }
 
     private void handMessage(byte[] message,ChannelHandlerContext ctx) {
@@ -128,21 +160,19 @@ public class RtmpDecoder extends ByteToMessageDecoder {
             case 0x14:
                 System.out.println("消息控制服务");
                 String msg = AMFUtil.load_amf_string(amfClass);
+                double txid = AMFUtil.load_amf_number(amfClass);
                 System.out.println(msg);
                 if(msg.equals("connect")) {
-                    double txid = AMFUtil.load_amf_number(amfClass);
                     Map<String,Object> data = AMFUtil.load_amf_object(amfClass);
                     if(data.containsKey("app")) {
                         String app = data.get("app").toString();
                         if(app.equals(Common.APP_NAME)) {
                             List<Byte> result = new ArrayList<Byte>();
                             byte[] resultString = AMFUtil.writeString("_result");
-                            System.out.println(Common.bytes2hex(resultString));
                             for(byte i: resultString){
                                 result.add(i);
                             }
                             byte[] resultNumber = AMFUtil.writeNumber(txid);
-                            System.out.println(Common.bytes2hex(resultNumber));
                             for(byte i: resultNumber){
                                 result.add(i);
                             }
@@ -153,11 +183,9 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                             version.put("capabilities",capabilities);
                             version.put("mode",mode);
                             byte[] versionByte = AMFUtil.writeObject(version);
-                            System.out.println(Common.bytes2hex(versionByte));
                             for(byte i: versionByte){
                                 result.add(i);
                             }
-
                             Map<String,Object> status = new HashMap<String, Object>();
                             double objectEncoding = 3.0;
                             status.put("level","status");
@@ -169,53 +197,58 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                             for(byte i: statusVersion){
                                 result.add(i);
                             }
-                            List<Byte> rtmpHead = new ArrayList<Byte>();
-                            byte flags = (3 & 0x3f) | (0 << 6);
-                            rtmpHead.add(flags);
-                            //System.out.println(flags);
-
-                            byte[] timestamp = {0x00,0x00,0x00};
-                            for(byte i: timestamp){
-                                rtmpHead.add(i);
-                            }
-                            int msg_len = result.size();
-                            //System.out.println(msg_len);
-                            byte[] msgLength = Common.intToByte(msg_len);
-                            rtmpHead.add(msgLength[2]);
-                            rtmpHead.add(msgLength[1]);
-                            rtmpHead.add(msgLength[0]);
-                            byte msg_type = 0x14;
-                            rtmpHead.add(msg_type);
-                            rtmpHead.add((byte) 0x00);
-                            rtmpHead.add((byte) 0x00);
-                            rtmpHead.add((byte) 0x00);
-                            rtmpHead.add((byte) 0x00);
-                            List<Byte> chunk = new ArrayList<Byte>();
-                            for(int i = 0; i < rtmpHead.size(); i++){
-                                chunk.add(rtmpHead.get(i));
-                            }
-                            int maxChunkSize = 128;
-                            int pos = 0;
-                            while(pos < result.size()){
-                               if(result.size() - pos < maxChunkSize){
-                                   for(int i = pos; i < result.size();i++){
-                                       chunk.add(result.get(i));
-                                   }
-                               } else {
-                                   for(int i = pos; i < pos + 128;i++) {
-                                       chunk.add(result.get(i));
-                                   }
-                                   chunk.add((byte) ((3 & 0x3f) | (3 << 6)));
-                               }
-                                pos += 128;
-                            }
-                            System.out.println(chunk.size());
-                            ctx.writeAndFlush(Unpooled.copiedBuffer(Common.conversionByteArray(chunk)));
-                            System.out.println(Common.bytes2hex(Common.conversionByteArray(chunk)));
+                            sendData(result,ctx);
                         }
                     }
-                }
+                } else if(msg.equals("createStream")) {
+                    List<Byte> result = new ArrayList<Byte>();
+                    byte[] resultString = AMFUtil.writeString("_result");
+                    for(byte i: resultString){
+                        result.add(i);
+                    }
+                    byte[] resultNumber = AMFUtil.writeNumber(txid);
+                    for(byte i: resultNumber){
+                        result.add(i);
+                    }
+                    byte[] resultStream = AMFUtil.writeNumber(Common.STREAM_ID);
+                    for(byte i: resultStream){
+                        result.add(i);
+                    }
+                    sendData(result,ctx);
+                } else if(msg.equals("publish")) {
+                   AMFUtil.load_amf(amfClass);
+                   String path = AMFUtil.load_amf_string(amfClass); //这个为发布的 url 协议
+                   System.out.println(path);
+                   Map<String,Object> status = new HashMap<String, Object>();
+                   status.put("level","status");
+                   status.put("code","NetStream.Publish.Start");
+                   status.put("description","Stream is now published.");
+                   status.put("details",path);
 
+                   List<Byte> result = new ArrayList<Byte>();
+                   for(byte i: AMFUtil.writeString("onStatus")) {
+                       result.add(i);
+                   }
+                   for(byte i: AMFUtil.writeNumber(0.0)){
+                       result.add(i);
+                   }
+                   result.add(AMFUtil.writeNull());
+                   for(byte i : AMFUtil.writeObject(status)){
+                       result.add(i);
+                   }
+                   sendData(result,ctx);
+
+                    List<Byte> result2 = new ArrayList<Byte>();
+                    byte[] resultString = AMFUtil.writeString("_result");
+                    for(byte i: resultString){
+                        result2.add(i);
+                    }
+                    byte[] resultNumber = AMFUtil.writeNumber(txid);
+                    for(byte i: resultNumber){
+                        result2.add(i);
+                    }
+                    sendData(result2,ctx);
+                }
                 break;
              default:
                  break;
@@ -230,6 +263,45 @@ public class RtmpDecoder extends ByteToMessageDecoder {
 //       System.out.println("payloadLength === " + this.payloadLength );
     }
 
+    private void sendData(List<Byte> chunkData,ChannelHandlerContext ctx) {
+        List<Byte> rtmpHead = new ArrayList<Byte>();
+        byte flags = (3 & 0x3f) | (0 << 6);
+        rtmpHead.add(flags);
+        byte[] timestamp = {0x00,0x00,0x00};
+        for(byte i: timestamp){
+            rtmpHead.add(i);
+        }
+        int msg_len = chunkData.size();
+        byte[] msgLength = Common.intToByte(msg_len);
+        rtmpHead.add(msgLength[2]);
+        rtmpHead.add(msgLength[1]);
+        rtmpHead.add(msgLength[0]);
+        byte msg_type = 0x14;
+        rtmpHead.add(msg_type);
+        rtmpHead.add((byte) 0x00);
+        rtmpHead.add((byte) 0x00);
+        rtmpHead.add((byte) 0x00);
+        rtmpHead.add((byte) 0x00);
+        List<Byte> chunk = new ArrayList<Byte>();
+        for(int i = 0; i < rtmpHead.size(); i++){
+            chunk.add(rtmpHead.get(i));
+        }
+        int pos = 0;
+        while(pos < chunkData.size()){
+            if(chunkData.size() - pos < Common.DEFAULT_CHUNK_MESSAGE_LENGTH){
+                for(int i = pos; i < chunkData.size();i++){
+                    chunk.add(chunkData.get(i));
+                }
+            } else {
+                for(int i = pos; i < pos + 128;i++) {
+                    chunk.add(chunkData.get(i));
+                }
+                chunk.add((byte) ((3 & 0x3f) | (3 << 6)));
+            }
+            pos += Common.DEFAULT_CHUNK_MESSAGE_LENGTH;
+        }
+        ctx.writeAndFlush(Unpooled.copiedBuffer(Common.conversionByteArray(chunk)));
+    }
 
 
     private int getBasicHeadLength(int csidTs) {
