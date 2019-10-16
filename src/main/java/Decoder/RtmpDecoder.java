@@ -6,6 +6,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.ByteToMessageDecoder;
+import org.omg.PortableInterceptor.SYSTEM_EXCEPTION;
 
 import java.util.*;
 
@@ -61,8 +62,10 @@ public class RtmpDecoder extends ByteToMessageDecoder {
             for(byte i: data){
                 chunkData.add(i);
             }
+            System.out.println("===================================================================");
+            System.out.println(Common.bytes2hex(Common.conversionByteArray(chunkData)));
+            System.out.println("===================================================================");
             handChunkMessage(chunkData,ctx);
-
         }
     }
 
@@ -75,14 +78,15 @@ public class RtmpDecoder extends ByteToMessageDecoder {
       //  System.out.println(Common.bytes2hex(Common.conversionByteArray(chunkData)));
         byte flags = chunkData.get(0);
         int[]  chunk_head_length = {12,8,4,1}; //对应的 chunk head length 长度
-        int fmt = flags >> 6; //向右移动 6 位 获取 fmt
+        System.out.println(Common.bytes2hex(new byte[]{(byte)(flags >> 6 & 0x03)}));
+        int fmt = ((byte)(flags >> 6)) & 0x03; //向右移动 6 位 获取 fmt
+
         System.out.println("fmt === " + fmt);
         int csidTS = flags & 0x3f; // 按位与 11 为 1 ，有0 为 0
         try{
              int head_len = chunk_head_length[fmt];
             int basic_head_len = chunkHeadIndex = getBasicHeadLength(csidTS);
             byte[] chunkDataByte = Common.conversionByteArray(chunkData);
-
             if(head_len >= 4) { // 大于 1 先提取出 timestamp
                 byte[] timestampByte = new byte[Common.TIMESTAMP_BYTE_LENGTH];
                 System.arraycopy(chunkDataByte,chunkHeadIndex,timestampByte,0,Common.TIMESTAMP_BYTE_LENGTH);
@@ -102,8 +106,6 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                     System.out.println(Common.bytes2hex(Common.conversionByteArray(chunkData)));
                     //ctx.close();
                 }
-
-
                 System.out.println("msg len " + this.msgLength);
                 chunkHeadIndex = chunkHeadIndex + Common.TIMESTAMP_BYTE_LENGTH;
 
@@ -130,6 +132,12 @@ public class RtmpDecoder extends ByteToMessageDecoder {
             for(int i = chunkHeadIndex;i < msgIndex; i++) {
                 chunkMessage.add(chunkData.get(i));
             }
+            System.out.println("==================================================");
+            System.out.println("数据长度" + msgLength);
+            System.out.println("chunkMessag 长度" + chunkMessage.size());
+            System.out.println(Common.bytes2hex(Common.conversionByteArray(chunkMessage)));
+            System.out.println("==================================================");
+
             System.out.println("chunkMessage size " + chunkMessage.size() + " msgLength " + msgLength + " msg index " + msgIndex);
             if(chunkMessage.size() < msgLength){ //还没有提取完所有数据
                 msgLength = msgLength - chunkMessage.size();
