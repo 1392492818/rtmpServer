@@ -35,6 +35,7 @@ public class Common {
     public static int AFM_NUMBER_LENGTH = 8; //afm 一个 number 的长度，其实为 double
 
 
+    public static int READ_CHUNK_LENGTH = 10240;//一次性读到 chunkdata 的数据长度
     public static String APP_NAME = "live";
 
     /**
