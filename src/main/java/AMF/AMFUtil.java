@@ -259,7 +259,7 @@ public class AMFUtil {
             number[index] = amfClass.message[i];
             index++;
         }
-        System.out.println(Common.bytes2hex(Common.reverseArray(number)));
+//        System.out.println (Common.bytes2hex(Common.reverseArray(number)));
         amfClass.pos += Common.AFM_NUMBER_LENGTH;
         return Common.bytesToDouble(Common.reverseArray(number));
     }
