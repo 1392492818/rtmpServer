@@ -8,7 +8,6 @@ import io.netty.buffer.Unpooled;
 import io.netty.buffer.UnpooledByteBufAllocator;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.ByteToMessageDecoder;
-import org.omg.PortableInterceptor.SYSTEM_EXCEPTION;
 
 import java.util.*;
 
@@ -46,8 +45,6 @@ public class RtmpDecoder extends ByteToMessageDecoder {
 
     private int head_len = 0;
     private boolean lackHeadMessage = false;
-    private int csid = 0;
-    private Map<Integer,Integer> csIdMap = new HashMap<Integer, Integer>();
 
 
     //握手数据
@@ -75,19 +72,19 @@ public class RtmpDecoder extends ByteToMessageDecoder {
      * @param ctx
      */
     private void handChunkMessage(ChannelHandlerContext ctx) {
-        List<Byte> headData = new ArrayList<Byte>();
+
         try{
             if(!lackMessage) {
                 if(!lackHeadMessage) {
                     //  System.out.println(Common.bytes2hex(Common.conversionByteArray(chunkData)));
                     byte[] flags = new byte[1];
                     byteBuf.readBytes(flags);
-                    headData.add(flags[0]);
+                    System.out.println((byte)(flags[0] & 0xff & 0xff));
+                    System.out.println(Integer.toHexString(flags[0]));
                     int[]  chunk_head_length = {12,8,4,1}; //对应的 chunk head length 长度
                     // byte fmtByte =  (byte)((byte)flags >> 6); //向右移动 6 位 获取 fmt
                     int fmt =  (byte) ((flags[0] & 0xff & 0xff) >> 6);
                     int csidTS = (byte)((flags[0] & 0xff & 0xff) & 0x3f); // 按位与 11 为 1 ，有0 为 0
-                    this.csid = csidTS;
                     this.head_len = chunk_head_length[fmt];
                     int basic_head_len = chunkHeadIndex = getBasicHeadLength(csidTS);
                     byte[] chunkDataByte = Common.conversionByteArray(chunkData);
@@ -97,18 +94,10 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                     return;
                 }
                 lackHeadMessage = false;
-                if((this.head_len == 1 || this.head_len == 4) && this.allMessageData == null){
-                    this.msgLength =  this.csIdMap.get(this.csid);
-                    this.allMsglength = this.csIdMap.get(this.csid);
-                    this.allMessageData = new byte[this.allMsglength];
-                }
-                //   System.out.println("head" + head_len + " msg Length " + this.msgLength);
+                System.out.println("head" + head_len + " msg Length " + this.msgLength);
                 if(head_len >= 4) { // 大于 1 先提取出 timestamp
                     byte[] timestampByte = new byte[Common.TIMESTAMP_BYTE_LENGTH];
                     byteBuf.readBytes(timestampByte);
-                    for(byte i : timestampByte){
-                        headData.add(i);
-                    }
                     timestamp =  Common.byteToInt24(timestampByte);
                     if(timestamp == Common.TIMESTAMP_MAX_NUM) {
                         isExtendedTimestamp = true; // 前3个字节放不下，放在最后面的四个字节
@@ -122,43 +111,28 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                     this.msgLength = Common.byteToInt24(msg_len);
                     this.allMsglength = Common.byteToInt24(msg_len);
                     this.allMessageData = new byte[allMsglength];
-                    this.csIdMap.put(this.csid,this.allMsglength);
-                    for(byte i : msg_len){
-                        headData.add(i);
-                    }
                     // 提取msgType
                     byte[] msgTypeByte = new byte[1];
                     byteBuf.readBytes(msgTypeByte);
                     this.msgType = msgTypeByte[0];
-//                    System.out.println("消息类型 === " + Integer.toHexString(this.msgType) + " msg len " + this.msgLength + " time " + timestamp);
-                    for(byte i : msgTypeByte){
-                        headData.add(i);
-                    }
+                    System.out.println("消息类型 === " + Integer.toHexString(this.msgType) + " msg len " + this.msgLength + " time " + timestamp);
                 }
 
                 if(head_len >= 12) {
                     byte[] streamByte = new byte[Common.STREAM_ID_LENGTH];
                     byteBuf.readBytes(streamByte);
                     this.streamId = Common.byteSmallToInt(streamByte); //只有 stream 是小端模式
-                    for(byte i : streamByte){
-                        headData.add(i);
-                    }
                     //System.out.println("streamId === " + streamId);
                 }
                 if(isExtendedTimestamp) {
                     byte[] timestampByte = new byte[Common.EXTEND_TIMESTAMP_LENGTH];
                     byteBuf.readBytes(timestampByte);
                     this.timestamp = Common.byteToInt24(timestampByte);
-                    for(byte i : timestampByte){
-                        headData.add(i);
-                    }
-
                 }
             }
-
             int msgIndex = msgLength > Common.DEFAULT_CHUNK_MESSAGE_LENGTH ?  Common.DEFAULT_CHUNK_MESSAGE_LENGTH :  msgLength;
             if(byteBuf.readableBytes() < msgIndex){  //如果不够，需要等到数据足够再读取
-                //    System.err.println("数据不足了");
+                System.err.println("数据不足了");
                 lackMessage = true;
                 return;
             }
@@ -167,8 +141,20 @@ public class RtmpDecoder extends ByteToMessageDecoder {
             byteBuf.readBytes(messageData);
             int index = 0;
             for(int i = this.readMessageIndex; i < this.readMessageIndex + msgIndex;i++){
-                this.allMessageData[i] = messageData[index];
-                index++;
+                try{
+                    this.allMessageData[i] = messageData[index];
+                    index++;
+                }catch (Exception e) {
+                    ctx.close();
+                    System.out.println("=======================");
+                    System.out.println(this.readMessageIndex);
+                    System.out.println(this.allMsglength);
+                    System.out.println(index);
+                    System.out.println(messageData.length);
+                    e.printStackTrace();
+                    return;
+                }
+
             }
             this.readMessageIndex += msgIndex;
             if(this.readMessageIndex < allMsglength){ //还没有提取完所有数据
@@ -176,13 +162,9 @@ public class RtmpDecoder extends ByteToMessageDecoder {
             } else {
                 System.out.println("解析的数据" + this.allMessageData.length);
                 handMessage(this.allMessageData,ctx);
-//                if(this.msgLength > 0) {
-//                    this.allMessageData = new byte[this.msgLength];
-//                    this.allMsglength = this.msgLength;
-//                }
                 this.allMessageData = null;
-                this.msgLength = 0;
                 this.readMessageIndex = 0;
+                this.allMsglength = 0;
                 isExtendedTimestamp = false;
             }
             if(byteBuf.readableBytes() > 0) {
