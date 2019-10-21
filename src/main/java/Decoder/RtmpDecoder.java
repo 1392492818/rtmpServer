@@ -2,12 +2,15 @@ package Decoder;
 
 import AMF.*;
 import Util.Common;
+import Util.MsgType;
+import com.sun.corba.se.impl.ior.ByteBuffer;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.Unpooled;
 import io.netty.buffer.UnpooledByteBufAllocator;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.ByteToMessageDecoder;
+import org.omg.PortableInterceptor.SYSTEM_EXCEPTION;
 
 import java.util.*;
 
@@ -45,6 +48,9 @@ public class RtmpDecoder extends ByteToMessageDecoder {
 
     private int head_len = 0;
     private boolean lackHeadMessage = false;
+    private int csid = 0;
+    private Map<Integer,Integer> csIdMap = new HashMap<Integer, Integer>();
+    private Map<Integer,Integer> timeMap = new HashMap<Integer, Integer>();
 
 
     //握手数据
@@ -58,6 +64,7 @@ public class RtmpDecoder extends ByteToMessageDecoder {
 
 
     protected void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception {
+
 //        System.err.println("可读字节 " + in.readableBytes());
         byteBuf = in;
         if(!isHandshake) { //rtmp 握手认证
@@ -72,19 +79,19 @@ public class RtmpDecoder extends ByteToMessageDecoder {
      * @param ctx
      */
     private void handChunkMessage(ChannelHandlerContext ctx) {
-
+        List<Byte> headData = new ArrayList<Byte>();
         try{
             if(!lackMessage) {
                 if(!lackHeadMessage) {
                     //  System.out.println(Common.bytes2hex(Common.conversionByteArray(chunkData)));
                     byte[] flags = new byte[1];
                     byteBuf.readBytes(flags);
-                    System.out.println((byte)(flags[0] & 0xff & 0xff));
-                    System.out.println(Integer.toHexString(flags[0]));
+                    headData.add(flags[0]);
                     int[]  chunk_head_length = {12,8,4,1}; //对应的 chunk head length 长度
                     // byte fmtByte =  (byte)((byte)flags >> 6); //向右移动 6 位 获取 fmt
                     int fmt =  (byte) ((flags[0] & 0xff & 0xff) >> 6);
                     int csidTS = (byte)((flags[0] & 0xff & 0xff) & 0x3f); // 按位与 11 为 1 ，有0 为 0
+                    this.csid = csidTS;
                     this.head_len = chunk_head_length[fmt];
                     int basic_head_len = chunkHeadIndex = getBasicHeadLength(csidTS);
                     byte[] chunkDataByte = Common.conversionByteArray(chunkData);
@@ -94,11 +101,30 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                     return;
                 }
                 lackHeadMessage = false;
-                System.out.println("head" + head_len + " msg Length " + this.msgLength);
+                if((this.head_len == 1 || this.head_len == 4) && this.allMessageData == null){
+                    this.msgLength =  this.csIdMap.get(this.csid);
+                    this.allMsglength = this.csIdMap.get(this.csid);
+                    this.allMessageData = new byte[this.allMsglength];
+                }
+                //   System.out.println("head" + head_len + " msg Length " + this.msgLength);
                 if(head_len >= 4) { // 大于 1 先提取出 timestamp
                     byte[] timestampByte = new byte[Common.TIMESTAMP_BYTE_LENGTH];
                     byteBuf.readBytes(timestampByte);
-                    timestamp =  Common.byteToInt24(timestampByte);
+                    for(byte i : timestampByte){
+                        headData.add(i);
+                    }
+                    int ts  =  Common.byteToInt24(timestampByte);
+                    if(timeMap.containsKey(csid)) { //如果存在那么 拿出之前的时间戳
+                        if(head_len < 12) {
+                            ts += timeMap.get(csid);
+                        }
+                        this.timestamp = ts;
+                        timeMap.put(csid,this.timestamp);
+                    } else {
+                        timestamp = ts;  //如果不存在 csid 在列表中， 那么时间戳直接赋值就可以
+                        timeMap.put(csid,this.timestamp);
+                    }
+
                     if(timestamp == Common.TIMESTAMP_MAX_NUM) {
                         isExtendedTimestamp = true; // 前3个字节放不下，放在最后面的四个字节
                     }
@@ -111,28 +137,44 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                     this.msgLength = Common.byteToInt24(msg_len);
                     this.allMsglength = Common.byteToInt24(msg_len);
                     this.allMessageData = new byte[allMsglength];
+                    this.csIdMap.put(this.csid,this.allMsglength);
+                    for(byte i : msg_len){
+                        headData.add(i);
+                    }
                     // 提取msgType
                     byte[] msgTypeByte = new byte[1];
                     byteBuf.readBytes(msgTypeByte);
                     this.msgType = msgTypeByte[0];
-                    System.out.println("消息类型 === " + Integer.toHexString(this.msgType) + " msg len " + this.msgLength + " time " + timestamp);
+                    for(byte i : msgTypeByte){
+                        headData.add(i);
+                    }
                 }
 
                 if(head_len >= 12) {
                     byte[] streamByte = new byte[Common.STREAM_ID_LENGTH];
                     byteBuf.readBytes(streamByte);
                     this.streamId = Common.byteSmallToInt(streamByte); //只有 stream 是小端模式
+                    for(byte i : streamByte){
+                        headData.add(i);
+                    }
                     //System.out.println("streamId === " + streamId);
                 }
+
+                System.out.println("消息类型 === " + Integer.toHexString(this.msgType) + " msg len " + this.msgLength + " time " + timestamp +" head_len " + head_len + " streamId === " + streamId);
+
                 if(isExtendedTimestamp) {
                     byte[] timestampByte = new byte[Common.EXTEND_TIMESTAMP_LENGTH];
                     byteBuf.readBytes(timestampByte);
                     this.timestamp = Common.byteToInt24(timestampByte);
+                    for(byte i : timestampByte){
+                        headData.add(i);
+                    }
                 }
             }
+
             int msgIndex = msgLength > Common.DEFAULT_CHUNK_MESSAGE_LENGTH ?  Common.DEFAULT_CHUNK_MESSAGE_LENGTH :  msgLength;
             if(byteBuf.readableBytes() < msgIndex){  //如果不够，需要等到数据足够再读取
-                System.err.println("数据不足了");
+                //    System.err.println("数据不足了");
                 lackMessage = true;
                 return;
             }
@@ -141,20 +183,8 @@ public class RtmpDecoder extends ByteToMessageDecoder {
             byteBuf.readBytes(messageData);
             int index = 0;
             for(int i = this.readMessageIndex; i < this.readMessageIndex + msgIndex;i++){
-                try{
-                    this.allMessageData[i] = messageData[index];
-                    index++;
-                }catch (Exception e) {
-                    ctx.close();
-                    System.out.println("=======================");
-                    System.out.println(this.readMessageIndex);
-                    System.out.println(this.allMsglength);
-                    System.out.println(index);
-                    System.out.println(messageData.length);
-                    e.printStackTrace();
-                    return;
-                }
-
+                this.allMessageData[i] = messageData[index];
+                index++;
             }
             this.readMessageIndex += msgIndex;
             if(this.readMessageIndex < allMsglength){ //还没有提取完所有数据
@@ -162,9 +192,13 @@ public class RtmpDecoder extends ByteToMessageDecoder {
             } else {
                 System.out.println("解析的数据" + this.allMessageData.length);
                 handMessage(this.allMessageData,ctx);
+//                if(this.msgLength > 0) {
+//                    this.allMessageData = new byte[this.msgLength];
+//                    this.allMsglength = this.msgLength;
+//                }
                 this.allMessageData = null;
+                this.msgLength = 0;
                 this.readMessageIndex = 0;
-                this.allMsglength = 0;
                 isExtendedTimestamp = false;
             }
             if(byteBuf.readableBytes() > 0) {
@@ -177,8 +211,6 @@ public class RtmpDecoder extends ByteToMessageDecoder {
         }
 
     }
-
-
 
     private void handMessage(byte[] message,ChannelHandlerContext ctx) {
         AMFClass amfClass = new AMFClass();
@@ -194,16 +226,7 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                     Map<String,Object> data = AMFUtil.load_amf_object(amfClass);
                     if(data.containsKey("app")) {
                         String app = data.get("app").toString();
-                        if(app.equals(Common.APP_NAME)) {
-                            List<Byte> result = new ArrayList<Byte>();
-                            byte[] resultString = AMFUtil.writeString("_result");
-                            for(byte i: resultString){
-                                result.add(i);
-                            }
-                            byte[] resultNumber = AMFUtil.writeNumber(txid);
-                            for(byte i: resultNumber){
-                                result.add(i);
-                            }
+                        if(app.equals(Common.APP_NAME)){
                             Map<String,Object> version = new HashMap<String, Object>();
                             double capabilities = 255.0;
                             double mode = 1.0;
@@ -211,9 +234,6 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                             version.put("capabilities",capabilities);
                             version.put("mode",mode);
                             byte[] versionByte = AMFUtil.writeObject(version);
-                            for(byte i: versionByte){
-                                result.add(i);
-                            }
                             Map<String,Object> status = new HashMap<String, Object>();
                             double objectEncoding = 3.0;
                             status.put("level","status");
@@ -221,74 +241,168 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                             status.put("description","Connection succeeded.");
                             status.put("objectEncoding",objectEncoding);
                             byte[] statusVersion = AMFUtil.writeObject(status);
-                            //System.out.println(Common.bytes2hex(statusVersion));
-                            for(byte i: statusVersion){
-                                result.add(i);
-                            }
-                            sendData(result,ctx);
+                            handResult(txid, MsgType.msg14,versionByte,statusVersion,0,ctx);
                         }
                     }
                 } else if(msg.equals("createStream")) {
-                    List<Byte> result = new ArrayList<Byte>();
-                    byte[] resultString = AMFUtil.writeString("_result");
-                    for(byte i: resultString){
-                        result.add(i);
-                    }
-                    byte[] resultNumber = AMFUtil.writeNumber(txid);
-                    for(byte i: resultNumber){
-                        result.add(i);
-                    }
                     byte[] resultStream = AMFUtil.writeNumber(Common.STREAM_ID);
-                    for(byte i: resultStream){
-                        result.add(i);
-                    }
-                    sendData(result,ctx);
+                    handResult(txid, MsgType.msg14,resultStream,new byte[]{},0,ctx);
                 } else if(msg.equals("publish")) {
                     AMFUtil.load_amf(amfClass);
                     String path = AMFUtil.load_amf_string(amfClass); //这个为发布的 url 协议
                     System.out.println(path);
+                    ByteBuf byteBuf = ByteBufAllocator.DEFAULT.buffer(1024);
+                    byteBuf.writeBytes(AMFUtil.writeString("onStatus"));
+                    byteBuf.writeBytes(AMFUtil.writeNumber(0.0));
+                    byteBuf.writeByte(AMFUtil.writeNull());
+                    int length = byteBuf.readableBytes();
+                    byte[] version = new byte[length];
+                    byteBuf.readBytes(version);
                     Map<String,Object> status = new HashMap<String, Object>();
                     status.put("level","status");
                     status.put("code","NetStream.Publish.Start");
                     status.put("description","Stream is now published.");
                     status.put("details",path);
+                    byte[] statusData = AMFUtil.writeObject(status);
+                    handData(MsgType.msg14,version,statusData,0,ctx);
 
-                    List<Byte> result = new ArrayList<Byte>();
-                    for(byte i: AMFUtil.writeString("onStatus")) {
-                        result.add(i);
-                    }
-                    for(byte i: AMFUtil.writeNumber(0.0)){
-                        result.add(i);
-                    }
-                    result.add(AMFUtil.writeNull());
-                    for(byte i : AMFUtil.writeObject(status)){
-                        result.add(i);
-                    }
-                    sendData(result,ctx);
+                    handResult(txid,MsgType.msg14,new byte[]{},new byte[]{},0,ctx);
+                } else if(msg.equals("FCPublish")) {
+                    AMFUtil.load_amf(amfClass);
+                    String path = AMFUtil.load_amf_string(amfClass); //这个为发布的 url 协议
 
-                    List<Byte> result2 = new ArrayList<Byte>();
-                    byte[] resultString = AMFUtil.writeString("_result");
-                    for(byte i: resultString){
-                        result2.add(i);
-                    }
-                    byte[] resultNumber = AMFUtil.writeNumber(txid);
-                    for(byte i: resultNumber){
-                        result2.add(i);
-                    }
-                    sendData(result2,ctx);
+                    ByteBuf byteBuf = ByteBufAllocator.DEFAULT.buffer(1024);
+                    byteBuf.writeBytes(AMFUtil.writeString("onFCPublish"));
+                    byteBuf.writeBytes(AMFUtil.writeNumber(0.0));
+                    byteBuf.writeByte(AMFUtil.writeNull());
+                    int length = byteBuf.readableBytes();
+                    byte[] version = new byte[length];
+                    byteBuf.readBytes(version);
+
+                    Map<String,Object> status = new HashMap<String, Object>();
+                    status.put("code","NetStream.Publish.Start");
+                    status.put("description",path);
+                    byte[] statusData = AMFUtil.writeObject(status);
+                    handData(MsgType.msg14,version,statusData,0,ctx);
+
+                    handResult(txid,MsgType.msg14,new byte[]{},new byte[]{},0,ctx);
+                } else if(msg.equals("play")) {
+                    AMFUtil.load_amf(amfClass);
+                    String path = AMFUtil.load_amf_string(amfClass); //这个为发布的 url 协议
+                    System.out.println(path);
+
+                    ByteBuf byteBuf = ByteBufAllocator.DEFAULT.buffer(1024);
+                    byteBuf.writeBytes(AMFUtil.writeString("onStatus"));
+                    byteBuf.writeBytes(AMFUtil.writeNumber(0.0));
+                    byteBuf.writeByte(AMFUtil.writeNull());
+                    int length = byteBuf.readableBytes();
+                    byte[] version = new byte[length];
+                    byteBuf.readBytes(version);
+
+                    Map<String,Object> status = new HashMap<String, Object>();
+                    status.put("level","status");
+                    status.put("code","NetStream.Play.Reset");
+                    status.put("description","Resetting and playing stream.");
+
+                    byte[] statusData = AMFUtil.writeObject(status);
+                    handData(MsgType.msg14,version,statusData,0,ctx);
+
+                    status = new HashMap<String, Object>();
+                    status.put("level","status");
+                    status.put("code","NetStream.Play.Start");
+                    status.put("description","Started playing.");
+                    statusData = AMFUtil.writeObject(status);
+
+                    byteBuf.writeBytes(AMFUtil.writeString("onStatus"));
+                    byteBuf.writeBytes(AMFUtil.writeNumber(0.0));
+                    byteBuf.writeByte(AMFUtil.writeNull());
+                    length = byteBuf.readableBytes();
+                    version = new byte[length];
+                    byteBuf.readBytes(version);
+                    handData(MsgType.msg14,version,statusData,0,ctx);
+//
+//                    client->playing = true;
+//                    client->ready = false;
+//
+//                    if (publisher != NULL) {
+//                        Encoder notify;
+//                        amf_write(&notify, std::string("onMetaData"));
+//                        amf_write_ecma(&notify, metadata);
+//                        rtmp_send(client, MSG_NOTIFY, STREAM_ID, notify.buf);
+//                    }
                 }
                 break;
+            case 0x12:
+                String type = AMFUtil.load_amf_string(amfClass);
+                System.out.println(type);
             default:
                 break;
         }
-//       MT =  message[chunkMessageIndex];
-//       System.out.println("Mt === " + MT  );
-//       chunkMessageIndex = chunkMessageIndex + Common.MESSAGE_MT_LENGTH;
-//       byte[] payLoadByte = new byte[Common.MESSAGE_PAYLOAD_LENGTH];
-//       System.arraycopy(message,chunkMessageIndex,payLoadByte,0,Common.MESSAGE_PAYLOAD_LENGTH);
-//       chunkMessageIndex = chunkMessageIndex + Common.MESSAGE_PAYLOAD_LENGTH;
-//       this.payloadLength = Common.byteToInt24(payLoadByte);
-//       System.out.println("payloadLength === " + this.payloadLength );
+    }
+
+    private void handData(byte msgType,byte[] version,byte[] status,int streamId,ChannelHandlerContext ctx) {
+        ByteBuf byteBuf = ByteBufAllocator.DEFAULT.buffer(1024);
+        byteBuf.writeBytes(version);
+        byteBuf.writeBytes(status);
+        int length = byteBuf.readableBytes();
+        byte[] data = new byte[length];
+        byteBuf.readBytes(data);
+        sendData(data,msgType,streamId,ctx);
+    }
+
+
+    private void handResult(double txid,byte msgType,byte[] version,byte[] status,int streamId,ChannelHandlerContext ctx) {
+        ByteBuf byteBuf = ByteBufAllocator.DEFAULT.buffer(1024);
+        byte[] resultString = AMFUtil.writeString("_result");
+        byteBuf.writeBytes(resultString);
+        byte[] resultNumber = AMFUtil.writeNumber(txid);
+        byteBuf.writeBytes(resultNumber);
+        byteBuf.writeBytes(version);
+        byteBuf.writeBytes(status);
+        int length = byteBuf.readableBytes();
+        byte[] data = new byte[length];
+        byteBuf.readBytes(data);
+        sendData(data,msgType,streamId,ctx);
+    }
+
+
+    private void sendData(byte[] chunkData,byte msgType,int streamId,ChannelHandlerContext ctx) {
+        ByteBuf byteBuf = ByteBufAllocator.DEFAULT.buffer(128);
+        byte flags = (3 & 0x3f) | (0 << 6);
+        byte[] timestamp = {0x00,0x00,0x00};
+        int msg_len = chunkData.length;
+        byte[] msgLength = Common.reverseArray(Common.intToByte24(msg_len));
+        byte[] streamData = Common.intToByte(streamId);
+
+        byteBuf.writeByte(flags);
+        byteBuf.writeBytes(timestamp);
+        byteBuf.writeBytes(msgLength);
+        byteBuf.writeByte(msgType);
+        byteBuf.writeBytes(streamData);
+        int pos = 0;
+        while(pos < chunkData.length){
+            if(byteBuf.writableBytes() < chunkData.length) {
+                byteBuf.ensureWritable(chunkData.length);
+            }
+            if(chunkData.length - pos < Common.DEFAULT_CHUNK_MESSAGE_LENGTH){
+                for(int i = pos; i < chunkData.length;i++){
+                    byteBuf.writeByte(chunkData[i]);
+                }
+            } else {
+                if(byteBuf.writableBytes() < pos + 128) {
+                    byteBuf.ensureWritable(pos + 128);
+                }
+                for(int i = pos; i < pos + 128;i++) {
+                    byteBuf.writeByte(chunkData[i]);
+                }
+                byteBuf.writeByte((byte) ((3 & 0x3f) | (3 << 6)));
+            }
+            pos += Common.DEFAULT_CHUNK_MESSAGE_LENGTH;
+        }
+        int sendLength = byteBuf.readableBytes();
+        byte[] sendData = new byte[sendLength];
+        byteBuf.readBytes(sendData);
+        ctx.writeAndFlush(Unpooled.copiedBuffer(sendData));
     }
 
     private void sendData(List<Byte> chunkData,ChannelHandlerContext ctx) {

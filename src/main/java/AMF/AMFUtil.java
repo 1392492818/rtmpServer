@@ -200,7 +200,7 @@ public class AMFUtil {
      * @return
      */
     public static boolean load_amf_boolean(AMFClass amfClass) {
-        if(amfClass.message[amfClass.pos] != AMF.String) {
+        if(amfClass.message[amfClass.pos] != AMF.Boolean) {
             System.out.println("boolean获取失败");
             return false;
         }

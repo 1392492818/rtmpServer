@@ -53,6 +53,19 @@ public class Common {
     }
 
     /**
+     * int 转换 为 byte
+     * @param val
+     * @return
+     */
+    public static byte[] intToByte24(int val){
+        byte[] b = new byte[3];
+        b[0] = (byte)(val & 0xff);
+        b[1] = (byte)((val >> 8) & 0xff);
+        b[2] = (byte)((val >> 16) & 0xff);
+        return b;
+    }
+
+    /**
      * 16 byte int
      * @param bytes
      * @return
