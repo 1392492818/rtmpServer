@@ -28,6 +28,7 @@ public class Common {
     public static int MESSAGE_TIMESTAMP_LENGTH = 4;
     public static int MESSAGE_STREAM_ID_LENGTH = 3;
     public static int DEFAULT_CHUNK_MESSAGE_LENGTH = 128;
+    public static double CONTROL_ID = 0;
     public static double STREAM_ID = 1337;
     // AMF
     public static int AFM_TYPE_LENGTH = 1; // afm 数据类型长度

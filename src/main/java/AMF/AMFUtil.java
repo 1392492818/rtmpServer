@@ -115,6 +115,34 @@ public class AMFUtil {
         return  Common.conversionByteArray(data);
     }
 
+    public static byte[] writeMixedArray(Map<String,Object> objectData) {
+        List<Byte> data = new ArrayList<Byte>();
+        data.add(AMF.MixedArray);
+        for(byte i : Common.intToByte(0)){
+            data.add(i);
+        }
+        for (Map.Entry<String, Object> entry : objectData.entrySet()) {
+            try {
+                byte[]  valueByte = writeValue(entry.getValue()); //如果解析不出 数据，直接跳过去
+                String key = entry.getKey();
+                byte[] keyByte = writeKey(key);
+                for(byte i : keyByte){
+                    data.add(i);
+                }
+                for(byte i: valueByte){
+                    data.add(i);
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+
+        }
+        data.add((byte) 0x00);
+        data.add((byte) 0x00);
+        data.add((byte) 0x09);
+        return  Common.conversionByteArray(data);
+    }
+
 
     /**
      * 获取 object value
@@ -300,6 +328,8 @@ public class AMFUtil {
             case AMF.Null:
                 amfClass.pos++;
                 return null;
+            case AMF.MixedArray:
+                return load_amf_mixedArray(amfClass);
             default:
                 System.out.println("其他消息" + type);
                 return null;
@@ -318,6 +348,37 @@ public class AMFUtil {
             return null;
         }
         amfClass.pos += 1;
+        while (true){
+            String key = load_amf_key(amfClass);
+            if(key.length() == 0){
+                break;
+            }
+            Object value = load_amf(amfClass);
+            amfData.put(key,value);
+//            System.out.println(key +"==="+value);
+        }
+        System.out.println(amfClass.pos);
+        amfClass.pos += 1;// object 最后 结束为 00 00 09 取到最后是00 所以 +1 跳过 09 这个 字节
+        return amfData;
+    }
+
+
+    /**
+     * 解析 amf object  数据
+     * @param amfClass
+     * @return
+     */
+    public static Map<String,Object> load_amf_mixedArray(AMFClass amfClass) {
+        Map<String,Object> amfData = new HashMap<String, Object>();
+        byte type = amfClass.message[amfClass.pos];
+        if(type !=  AMF.MixedArray){
+            return null;
+        }
+        amfClass.pos += 1;
+        if(amfClass.pos + 4 > amfClass.message.length) {
+            return null;
+        }
+        amfClass.pos += 4;
         while (true){
             String key = load_amf_key(amfClass);
             if(key.length() == 0){

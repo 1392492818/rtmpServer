@@ -60,6 +60,8 @@ public class RtmpDecoder extends ByteToMessageDecoder {
     private List<Byte> S1 = new ArrayList<Byte>();
     private List<Byte> S2 = new ArrayList<Byte>();
     private byte[] zero = {0x00,0x00,0x00,0x00};
+
+    private Map<String,Object> MetaData = null;
     @Override
 
 
@@ -153,6 +155,7 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                 if(head_len >= 12) {
                     byte[] streamByte = new byte[Common.STREAM_ID_LENGTH];
                     byteBuf.readBytes(streamByte);
+                    System.out.println(Common.bytes2hex(streamByte));
                     this.streamId = Common.byteSmallToInt(streamByte); //只有 stream 是小端模式
                     for(byte i : streamByte){
                         headData.add(i);
@@ -161,7 +164,7 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                 }
 
                 System.out.println("消息类型 === " + Integer.toHexString(this.msgType) + " msg len " + this.msgLength + " time " + timestamp +" head_len " + head_len + " streamId === " + streamId);
-
+//                System.out.println("head mess " + Common.bytes2hex(headData) );
                 if(isExtendedTimestamp) {
                     byte[] timestampByte = new byte[Common.EXTEND_TIMESTAMP_LENGTH];
                     byteBuf.readBytes(timestampByte);
@@ -212,114 +215,101 @@ public class RtmpDecoder extends ByteToMessageDecoder {
 
     }
 
-    private void handMessage(byte[] message,ChannelHandlerContext ctx) {
-        AMFClass amfClass = new AMFClass();
-        amfClass.message = message;
-        amfClass.pos = 0;
-        switch (msgType) {
-            case 0x14:
-                //  System.out.println("消息控制服务");
-                String msg = AMFUtil.load_amf_string(amfClass);
-                double txid = AMFUtil.load_amf_number(amfClass);
-                System.out.println(msg);
-                if(msg.equals("connect")) {
-                    Map<String,Object> data = AMFUtil.load_amf_object(amfClass);
-                    if(data.containsKey("app")) {
-                        String app = data.get("app").toString();
-                        if(app.equals(Common.APP_NAME)){
-                            Map<String,Object> version = new HashMap<String, Object>();
-                            double capabilities = 255.0;
-                            double mode = 1.0;
-                            version.put("fmsVer","FMS/4,5,1,484");
-                            version.put("capabilities",capabilities);
-                            version.put("mode",mode);
-                            byte[] versionByte = AMFUtil.writeObject(version);
-                            Map<String,Object> status = new HashMap<String, Object>();
-                            double objectEncoding = 3.0;
-                            status.put("level","status");
-                            status.put("code","NetConnection.Connect.Success");
-                            status.put("description","Connection succeeded.");
-                            status.put("objectEncoding",objectEncoding);
-                            byte[] statusVersion = AMFUtil.writeObject(status);
-                            handResult(txid, MsgType.msg14,versionByte,statusVersion,0,ctx);
-                        }
-                    }
-                } else if(msg.equals("createStream")) {
-                    byte[] resultStream = AMFUtil.writeNumber(Common.STREAM_ID);
-                    handResult(txid, MsgType.msg14,resultStream,new byte[]{},0,ctx);
-                } else if(msg.equals("publish")) {
-                    AMFUtil.load_amf(amfClass);
-                    String path = AMFUtil.load_amf_string(amfClass); //这个为发布的 url 协议
-                    System.out.println(path);
-                    ByteBuf byteBuf = ByteBufAllocator.DEFAULT.buffer(1024);
-                    byteBuf.writeBytes(AMFUtil.writeString("onStatus"));
-                    byteBuf.writeBytes(AMFUtil.writeNumber(0.0));
-                    byteBuf.writeByte(AMFUtil.writeNull());
-                    int length = byteBuf.readableBytes();
-                    byte[] version = new byte[length];
-                    byteBuf.readBytes(version);
-                    Map<String,Object> status = new HashMap<String, Object>();
-                    status.put("level","status");
-                    status.put("code","NetStream.Publish.Start");
-                    status.put("description","Stream is now published.");
-                    status.put("details",path);
-                    byte[] statusData = AMFUtil.writeObject(status);
-                    handData(MsgType.msg14,version,statusData,0,ctx);
+    /**
+     * 用户链接
+     * @param txid
+     * @param ctx
+     */
+    private void handConnect(double txid,ChannelHandlerContext ctx) {
+        Map<String,Object> version = new HashMap<String, Object>();
+        double capabilities = 255.0;
+        double mode = 1.0;
+        version.put("fmsVer","FMS/4,5,1,484");
+        version.put("capabilities",capabilities);
+        version.put("mode",mode);
+        byte[] versionByte = AMFUtil.writeObject(version);
+        Map<String,Object> status = new HashMap<String, Object>();
+        double objectEncoding = 3.0;
+        status.put("level","status");
+        status.put("code","NetConnection.Connect.Success");
+        status.put("description","Connection succeeded.");
+        status.put("objectEncoding",objectEncoding);
+        byte[] statusVersion = AMFUtil.writeObject(status);
+        handResult(txid, MsgType.msg14,versionByte,statusVersion,0,ctx);
+    }
 
-                    handResult(txid,MsgType.msg14,new byte[]{},new byte[]{},0,ctx);
-                } else if(msg.equals("FCPublish")) {
-                    AMFUtil.load_amf(amfClass);
-                    String path = AMFUtil.load_amf_string(amfClass); //这个为发布的 url 协议
+    /**
+     *
+     * @param amfClass
+     * @param txid
+     * @param ctx
+     */
+    private void handPublish(AMFClass amfClass,double txid,ChannelHandlerContext ctx) {
+        AMFUtil.load_amf(amfClass);
+        String path = AMFUtil.load_amf_string(amfClass); //这个为发布的 url 协议
+        System.out.println(path);
+        ByteBuf byteBuf = ByteBufAllocator.DEFAULT.buffer(1024);
+        byteBuf.writeBytes(AMFUtil.writeString("onStatus"));
+        byteBuf.writeBytes(AMFUtil.writeNumber(0.0));
+        byteBuf.writeByte(AMFUtil.writeNull());
+        int length = byteBuf.readableBytes();
+        byte[] version = new byte[length];
+        byteBuf.readBytes(version);
+        Map<String,Object> status = new HashMap<String, Object>();
+        status.put("level","status");
+        status.put("code","NetStream.Publish.Start");
+        status.put("description","Stream is now published.");
+        status.put("details",path);
+        byte[] statusData = AMFUtil.writeObject(status);
+        handData(MsgType.msg14,version,statusData,0,ctx);
 
-                    ByteBuf byteBuf = ByteBufAllocator.DEFAULT.buffer(1024);
-                    byteBuf.writeBytes(AMFUtil.writeString("onFCPublish"));
-                    byteBuf.writeBytes(AMFUtil.writeNumber(0.0));
-                    byteBuf.writeByte(AMFUtil.writeNull());
-                    int length = byteBuf.readableBytes();
-                    byte[] version = new byte[length];
-                    byteBuf.readBytes(version);
+        handResult(txid,MsgType.msg14,new byte[]{AMFUtil.writeNull()},new byte[]{AMFUtil.writeNull()},0,ctx);
+    }
 
-                    Map<String,Object> status = new HashMap<String, Object>();
-                    status.put("code","NetStream.Publish.Start");
-                    status.put("description",path);
-                    byte[] statusData = AMFUtil.writeObject(status);
-                    handData(MsgType.msg14,version,statusData,0,ctx);
+    /**
+     *
+     * @param amfClass
+     * @param txid
+     * @param ctx
+     */
+    private void handPlay(AMFClass amfClass,double txid,ChannelHandlerContext ctx) {
+        AMFUtil.load_amf(amfClass);
+        String path = AMFUtil.load_amf_string(amfClass); //这个为发布的 url 协议
+        System.out.println(path);
+        startPalyback(ctx);
+        handResult(txid,MsgType.msg14,new byte[]{AMFUtil.writeNull()},new byte[]{AMFUtil.writeNull()},0,ctx);
+    }
 
-                    handResult(txid,MsgType.msg14,new byte[]{},new byte[]{},0,ctx);
-                } else if(msg.equals("play")) {
-                    AMFUtil.load_amf(amfClass);
-                    String path = AMFUtil.load_amf_string(amfClass); //这个为发布的 url 协议
-                    System.out.println(path);
+    private void startPalyback(ChannelHandlerContext ctx) {
+        ByteBuf byteBuf = ByteBufAllocator.DEFAULT.buffer(1024);
+        byteBuf.writeBytes(AMFUtil.writeString("onStatus"));
+        byteBuf.writeBytes(AMFUtil.writeNumber(0.0));
+        byteBuf.writeByte(AMFUtil.writeNull());
+        int length = byteBuf.readableBytes();
+        byte[] version = new byte[length];
+        byteBuf.readBytes(version);
 
-                    ByteBuf byteBuf = ByteBufAllocator.DEFAULT.buffer(1024);
-                    byteBuf.writeBytes(AMFUtil.writeString("onStatus"));
-                    byteBuf.writeBytes(AMFUtil.writeNumber(0.0));
-                    byteBuf.writeByte(AMFUtil.writeNull());
-                    int length = byteBuf.readableBytes();
-                    byte[] version = new byte[length];
-                    byteBuf.readBytes(version);
+        Map<String,Object> status = new HashMap<String, Object>();
+        status.put("level","status");
+        status.put("code","NetStream.Play.Reset");
+        status.put("description","Resetting and playing stream.");
 
-                    Map<String,Object> status = new HashMap<String, Object>();
-                    status.put("level","status");
-                    status.put("code","NetStream.Play.Reset");
-                    status.put("description","Resetting and playing stream.");
+        byte[] statusData = AMFUtil.writeObject(status);
+        handData(MsgType.msg14,version,statusData,0,ctx);
 
-                    byte[] statusData = AMFUtil.writeObject(status);
-                    handData(MsgType.msg14,version,statusData,0,ctx);
+        status = new HashMap<String, Object>();
+        status.put("level","status");
+        status.put("code","NetStream.Play.Start");
+        status.put("description","Started playing.");
+        statusData = AMFUtil.writeObject(status);
 
-                    status = new HashMap<String, Object>();
-                    status.put("level","status");
-                    status.put("code","NetStream.Play.Start");
-                    status.put("description","Started playing.");
-                    statusData = AMFUtil.writeObject(status);
-
-                    byteBuf.writeBytes(AMFUtil.writeString("onStatus"));
-                    byteBuf.writeBytes(AMFUtil.writeNumber(0.0));
-                    byteBuf.writeByte(AMFUtil.writeNull());
-                    length = byteBuf.readableBytes();
-                    version = new byte[length];
-                    byteBuf.readBytes(version);
-                    handData(MsgType.msg14,version,statusData,0,ctx);
+        byteBuf.writeBytes(AMFUtil.writeString("onStatus"));
+        byteBuf.writeBytes(AMFUtil.writeNumber(0.0));
+        byteBuf.writeByte(AMFUtil.writeNull());
+        length = byteBuf.readableBytes();
+        version = new byte[length];
+        byteBuf.readBytes(version);
+        handData(MsgType.msg14,version,statusData,0,ctx);
 //
 //                    client->playing = true;
 //                    client->ready = false;
@@ -330,16 +320,137 @@ public class RtmpDecoder extends ByteToMessageDecoder {
 //                        amf_write_ecma(&notify, metadata);
 //                        rtmp_send(client, MSG_NOTIFY, STREAM_ID, notify.buf);
 //                    }
+    }
+
+    /**
+     *
+     * @param amfClass
+     * @param txid
+     * @param ctx
+     */
+    private void handFCpublish(AMFClass amfClass,double txid,ChannelHandlerContext ctx) {
+        AMFUtil.load_amf(amfClass);
+        String path = AMFUtil.load_amf_string(amfClass); //这个为发布的 url 协议
+
+        ByteBuf byteBuf = ByteBufAllocator.DEFAULT.buffer(1024);
+        byteBuf.writeBytes(AMFUtil.writeString("onFCPublish"));
+        byteBuf.writeBytes(AMFUtil.writeNumber(0.0));
+        byteBuf.writeByte(AMFUtil.writeNull());
+        int length = byteBuf.readableBytes();
+        byte[] version = new byte[length];
+        byteBuf.readBytes(version);
+
+        Map<String,Object> status = new HashMap<String, Object>();
+        status.put("code","NetStream.Publish.Start");
+        status.put("description",path);
+        byte[] statusData = AMFUtil.writeObject(status);
+        handData(MsgType.msg14,version,statusData,0,ctx);
+
+        handResult(txid,MsgType.msg14,new byte[]{AMFUtil.writeNull()},new byte[]{AMFUtil.writeNull()},0,ctx);
+    }
+
+    /**
+     * 播放还是停止
+     * @param amfClass
+     * @param txid
+     * @param ctx
+     */
+    private void handPause(AMFClass amfClass,double txid,ChannelHandlerContext ctx) {
+        AMFUtil.load_amf(amfClass); /* NULL */
+
+        Boolean paused = AMFUtil.load_amf_boolean(amfClass);
+
+        if (paused) {
+            System.out.println("pausing\n");
+
+            ByteBuf byteBuf = ByteBufAllocator.DEFAULT.buffer(1024);
+            byteBuf.writeBytes(AMFUtil.writeString("onStatus"));
+            byteBuf.writeBytes(AMFUtil.writeNumber(0.0));
+            byteBuf.writeByte(AMFUtil.writeNull());
+            byte[] version = new byte[byteBuf.readableBytes()];
+            byteBuf.readBytes(version);
+            Map<String,Object> status = new HashMap<String, Object>();
+            status.put("level","status");
+            status.put("code","NetStream.Pause.Notify");
+            status.put("description","Pausing.");
+            byte[] statusData = AMFUtil.writeObject(status);
+            handResult(txid,MsgType.msg14,version,statusData,0,ctx);
+
+//            client->playing = false;
+        } else {
+            startPalyback(ctx);
+        }
+        handResult(txid,MsgType.msg14,new byte[]{AMFUtil.writeNull()},new byte[]{AMFUtil.writeNull()},0,ctx);
+    }
+
+    /**
+     * 处理message 消息
+     * @param message
+     * @param ctx
+     */
+    private void handMessage(byte[] message,ChannelHandlerContext ctx) {
+        AMFClass amfClass = new AMFClass();
+        amfClass.message = message;
+        amfClass.pos = 0;
+        switch (msgType) {
+            case 0x14:
+                //  System.out.println("消息控制服务");
+                String msg = AMFUtil.load_amf_string(amfClass);
+                double txid = AMFUtil.load_amf_number(amfClass);
+                System.out.println(msg);
+
+                if(this.streamId == Common.CONTROL_ID) {
+                    if(msg.equals("connect")) {
+                        Map<String,Object> data = AMFUtil.load_amf_object(amfClass);
+                        if(data.containsKey("app")) {
+                            String app = data.get("app").toString();
+                            if(app.equals(Common.APP_NAME)){
+                                handConnect(txid,ctx);
+                            }
+                        }
+                    } else if(msg.equals("createStream")) {
+                        byte[] status = {AMFUtil.writeNull()};
+                        byte[] version = AMFUtil.writeNumber(Common.STREAM_ID);
+                        handResult(txid, MsgType.msg14,status,version,0,ctx);
+                    } else if(msg.equals("FCPublish")) {
+                        handFCpublish(amfClass,txid,ctx);
+                    }
+                }
+
+                if(this.streamId == Common.STREAM_ID) {
+                    if(msg.equals("publish")) {
+                        handPublish(amfClass,txid,ctx);
+                    } else if(msg.equals("play")) {
+                        handPlay(amfClass,txid,ctx);
+                    } else if(msg.equals("pause")){
+                        handPause(amfClass,txid,ctx);
+                    }
                 }
                 break;
-            case 0x12:
-                String type = AMFUtil.load_amf_string(amfClass);
-                System.out.println(type);
+            case 0x12: //设置一些元信息
+
+
+                String command  = AMFUtil.load_amf_string(amfClass);
+                System.out.println(command);
+                if(command.equals("@setDataFrame")){
+                    String type = AMFUtil.load_amf_string(amfClass);
+                    System.out.println(type);
+                    Map<String,Object> data = AMFUtil.load_amf_mixedArray(amfClass);
+                    this.MetaData = data;
+                }
             default:
                 break;
         }
     }
 
+    /**
+     * 统一数据返回格式
+     * @param msgType
+     * @param version
+     * @param status
+     * @param streamId
+     * @param ctx
+     */
     private void handData(byte msgType,byte[] version,byte[] status,int streamId,ChannelHandlerContext ctx) {
         ByteBuf byteBuf = ByteBufAllocator.DEFAULT.buffer(1024);
         byteBuf.writeBytes(version);
@@ -350,7 +461,15 @@ public class RtmpDecoder extends ByteToMessageDecoder {
         sendData(data,msgType,streamId,ctx);
     }
 
-
+    /**
+     * 统一 _result 返回
+     * @param txid
+     * @param msgType
+     * @param version
+     * @param status
+     * @param streamId
+     * @param ctx
+     */
     private void handResult(double txid,byte msgType,byte[] version,byte[] status,int streamId,ChannelHandlerContext ctx) {
         ByteBuf byteBuf = ByteBufAllocator.DEFAULT.buffer(1024);
         byte[] resultString = AMFUtil.writeString("_result");
@@ -366,6 +485,13 @@ public class RtmpDecoder extends ByteToMessageDecoder {
     }
 
 
+    /**
+     * 同意数据发送
+     * @param chunkData
+     * @param msgType
+     * @param streamId
+     * @param ctx
+     */
     private void sendData(byte[] chunkData,byte msgType,int streamId,ChannelHandlerContext ctx) {
         ByteBuf byteBuf = ByteBufAllocator.DEFAULT.buffer(128);
         byte flags = (3 & 0x3f) | (0 << 6);
@@ -405,47 +531,11 @@ public class RtmpDecoder extends ByteToMessageDecoder {
         ctx.writeAndFlush(Unpooled.copiedBuffer(sendData));
     }
 
-    private void sendData(List<Byte> chunkData,ChannelHandlerContext ctx) {
-        List<Byte> rtmpHead = new ArrayList<Byte>();
-        byte flags = (3 & 0x3f) | (0 << 6);
-        rtmpHead.add(flags);
-        byte[] timestamp = {0x00,0x00,0x00};
-        for(byte i: timestamp){
-            rtmpHead.add(i);
-        }
-        int msg_len = chunkData.size();
-        byte[] msgLength = Common.intToByte(msg_len);
-        rtmpHead.add(msgLength[2]);
-        rtmpHead.add(msgLength[1]);
-        rtmpHead.add(msgLength[0]);
-        byte msg_type = 0x14;
-        rtmpHead.add(msg_type);
-        rtmpHead.add((byte) 0x00);
-        rtmpHead.add((byte) 0x00);
-        rtmpHead.add((byte) 0x00);
-        rtmpHead.add((byte) 0x00);
-        List<Byte> chunk = new ArrayList<Byte>();
-        for(int i = 0; i < rtmpHead.size(); i++){
-            chunk.add(rtmpHead.get(i));
-        }
-        int pos = 0;
-        while(pos < chunkData.size()){
-            if(chunkData.size() - pos < Common.DEFAULT_CHUNK_MESSAGE_LENGTH){
-                for(int i = pos; i < chunkData.size();i++){
-                    chunk.add(chunkData.get(i));
-                }
-            } else {
-                for(int i = pos; i < pos + 128;i++) {
-                    chunk.add(chunkData.get(i));
-                }
-                chunk.add((byte) ((3 & 0x3f) | (3 << 6)));
-            }
-            pos += Common.DEFAULT_CHUNK_MESSAGE_LENGTH;
-        }
-        ctx.writeAndFlush(Unpooled.copiedBuffer(Common.conversionByteArray(chunk)));
-    }
-
-
+    /**
+     * 根据csidTS 获取 basic head 长度
+     * @param csidTs
+     * @return
+     */
     private int getBasicHeadLength(int csidTs) {
         if(csidTs == 0) {
             return 2;
@@ -519,192 +609,43 @@ public class RtmpDecoder extends ByteToMessageDecoder {
         super.exceptionCaught(ctx, cause);
     }
 
-
-//    /**
-//     * 废弃解析chunkMessage 数据
-//     * @param chunkData
-//     * @param ctx
-//     */
-//    private void handChunkMessage(List<Byte> chunkData,ChannelHandlerContext ctx) {
-//        //  System.out.println(Common.bytes2hex(Common.conversionByteArray(chunkData)));
-//        byte flags = chunkData.get(0);
-//        int[]  chunk_head_length = {12,8,4,1}; //对应的 chunk head length 长度
-//        // byte fmtByte =  (byte)((byte)flags >> 6); //向右移动 6 位 获取 fmt
-//        int fmt =  (byte) ((flags & 0xff & 0xff) >> 6);
-//        int csidTS = (byte)((flags & 0xff & 0xff) & 0x3f); // 按位与 11 为 1 ，有0 为 0
-//
-//        try{
-//            int head_len = chunk_head_length[fmt];
-//            int basic_head_len = chunkHeadIndex = getBasicHeadLength(csidTS);
-//            byte[] chunkDataByte = Common.conversionByteArray(chunkData);
-//
-//            if(head_len >= 4) { // 大于 1 先提取出 timestamp
-//                byte[] timestampByte = new byte[Common.TIMESTAMP_BYTE_LENGTH];
-//                System.arraycopy(chunkDataByte,chunkHeadIndex,timestampByte,0,Common.TIMESTAMP_BYTE_LENGTH);
-//                timestamp =  Common.byteToInt24(timestampByte);
-//                if(timestamp == Common.TIMESTAMP_MAX_NUM) {
-//                    isExtendedTimestamp = true; // 前3个字节放不下，放在最后面的四个字节
-//                }
-//                //   System.out.println("timestamp == " + timestamp);
-//                chunkHeadIndex = chunkHeadIndex + Common.TIMESTAMP_BYTE_LENGTH;
-//            }
-//            if(head_len >= 8) { // 大于 4 先提取出 msgLength
-//                byte[] msg_len = new byte[Common.TIMESTAMP_BYTE_LENGTH];
-//                System.arraycopy(chunkDataByte,chunkHeadIndex,msg_len,0,Common.MSG_LEN_LENGTH);
-//                this.msgLength = Common.byteToInt24(msg_len);
-//                this.allMsglength = Common.byteToInt24(msg_len);
-//                if(this.msgLength > chunkData.size()) { //后面分包的情况,这方法可能有问题
-//                    //   System.out.println("101 数据不全");
-//                    //System.out.println(Common.bytes2hex(Common.conversionByteArray(chunkData)));
-//                    //ctx.close();
-//                }
-//                chunkHeadIndex = chunkHeadIndex + Common.TIMESTAMP_BYTE_LENGTH;
-//
-//                this.msgType = chunkDataByte[chunkHeadIndex];
-//                chunkHeadIndex = chunkHeadIndex + Common.MST_TYPE_LENGTH;
-//                System.out.println("消息类型 === " + Integer.toHexString(this.msgType) + " msg len " + this.msgLength + " time " + timestamp);
-//            }
-//
-//            if(head_len >= 12) {
-//                byte[] streamByte = new byte[Common.STREAM_ID_LENGTH];
-//                System.arraycopy(chunkDataByte,chunkHeadIndex,streamByte,0,Common.STREAM_ID_LENGTH);
-//                this.streamId = Common.byteSmallToInt(streamByte); //只有 stream 是小端模式
-//                //System.out.println("streamId === " + streamId);
-//                chunkHeadIndex = chunkHeadIndex + Common.STREAM_ID_LENGTH;
-//            }
-//            if(isExtendedTimestamp) {
-//                byte[] timestampByte = new byte[Common.EXTEND_TIMESTAMP_LENGTH];
-//                System.arraycopy(chunkDataByte,chunkHeadIndex,timestampByte,0,Common.EXTEND_TIMESTAMP_LENGTH);
-//                this.timestamp = Common.byteToInt24(timestampByte);
-//                chunkHeadIndex = chunkHeadIndex + Common.EXTEND_TIMESTAMP_LENGTH;
-//            }
-//            int msgIndex = msgLength > Common.DEFAULT_CHUNK_MESSAGE_LENGTH ? chunkHeadIndex + Common.DEFAULT_CHUNK_MESSAGE_LENGTH : chunkHeadIndex + msgLength;
-//            if(chunkData.size() < msgIndex){
-//                return;
-//            }
-//            for(int i = chunkHeadIndex;i < msgIndex; i++) {
-//                chunkMessage.add(chunkData.get(i));
-//            }
-//            if(chunkMessage.size() < allMsglength){ //还没有提取完所有数据
-//                msgLength = allMsglength - chunkMessage.size();
-//            } else {
-//                handMessage(Common.conversionByteArray(chunkMessage),ctx);
-//                isExtendedTimestamp = false;
-//                chunkMessage = new ArrayList<Byte>();
-//            }
-//            chunkHeadIndex = 0;
-//            chunkData = Common.removeList(chunkData,0,msgIndex - 1); // 如果chunkData 还有数据，粘包了，那么解析就好了
-//            if(chunkData.size() > 0) { //如果还有数据，那么继续解析就好了
-//                try {
-//                    handChunkMessage(chunkData,ctx);
-//                }catch (Exception e) {
-//                    return ;
+//    private void sendData(List<Byte> chunkData,ChannelHandlerContext ctx) {
+//        List<Byte> rtmpHead = new ArrayList<Byte>();
+//        byte flags = (3 & 0x3f) | (0 << 6);
+//        rtmpHead.add(flags);
+//        byte[] timestamp = {0x00,0x00,0x00};
+//        for(byte i: timestamp){
+//            rtmpHead.add(i);
+//        }
+//        int msg_len = chunkData.size();
+//        byte[] msgLength = Common.intToByte(msg_len);
+//        rtmpHead.add(msgLength[2]);
+//        rtmpHead.add(msgLength[1]);
+//        rtmpHead.add(msgLength[0]);
+//        byte msg_type = 0x14;
+//        rtmpHead.add(msg_type);
+//        rtmpHead.add((byte) 0x00);
+//        rtmpHead.add((byte) 0x00);
+//        rtmpHead.add((byte) 0x00);
+//        rtmpHead.add((byte) 0x00);
+//        List<Byte> chunk = new ArrayList<Byte>();
+//        for(int i = 0; i < rtmpHead.size(); i++){
+//            chunk.add(rtmpHead.get(i));
+//        }
+//        int pos = 0;
+//        while(pos < chunkData.size()){
+//            if(chunkData.size() - pos < Common.DEFAULT_CHUNK_MESSAGE_LENGTH){
+//                for(int i = pos; i < chunkData.size();i++){
+//                    chunk.add(chunkData.get(i));
 //                }
 //            } else {
-//                setChunkData(ctx);
-//            }
-//        }catch (Exception e) {
-//            ctx.close();
-//            e.printStackTrace();
-//            System.err.println(Common.bytes2hex(Common.conversionByteArray(chunkData)));
-//        }
-//
-//    }
-//
-//    private void setChunkData(ChannelHandlerContext ctx) {
-//        if(chunkData.size() >= Common.READ_CHUNK_LENGTH) {
-//            handChunkMessage(chunkData,ctx);
-//            return;
-//        }
-//        int length = byteBuf.readableBytes() > Common.READ_CHUNK_LENGTH ? Common.READ_CHUNK_LENGTH : byteBuf.readableBytes();
-//        if(Common.READ_CHUNK_LENGTH - chunkData.size() <length) {
-//            length = Common.READ_CHUNK_LENGTH - chunkData.size();
-//        }
-//        if(length > 0) {
-//            byte[] data = new byte[length];
-//            byteBuf.readBytes(data);
-//            for(byte i: data){
-//                chunkData.add(i);
-//            }
-//            handChunkMessage(chunkData,ctx);
-//        }
-//    }
-
-
-
-//    /**
-//     * rtmp 握手数据判断
-//     * @param ctx
-//     */
-//    private void handshake(ChannelHandlerContext ctx){
-//        if(handshakeData.size() >= Common.C0_LENGTH && !isSendS1){
-//            byte c0 = handshakeData.get(Common.C0_INDEX);
-//            if(c0 != Common.C0){ //如果 c0 错误，那么关闭连接
-//                ctx.close();
-//                return;
-//            } else {
-//                int time = (int) (new Date().getTime() / 1000);
-//                byte[] timeByte = Common.intToByte(time);
-//                ctx.writeAndFlush(Unpooled.copiedBuffer(new byte[]{Common.S0}));
-//                for(byte i : timeByte){
-//                    S1.add(i);
+//                for(int i = pos; i < pos + 128;i++) {
+//                    chunk.add(chunkData.get(i));
 //                }
-//                for(byte i: zero){
-//                    S1.add(i);
-//                }
-//                for(int i = 0; i < Common.RANDOM_LENGTH;i++) {
-//                    Random random = new Random();
-//                    S1.add((byte) random.nextInt(9));
-//                }
-//                ctx.writeAndFlush(Unpooled.copiedBuffer(Common.conversionByteArray(S1)));
-//                isSendS1 = true;
+//                chunk.add((byte) ((3 & 0x3f) | (3 << 6)));
 //            }
+//            pos += Common.DEFAULT_CHUNK_MESSAGE_LENGTH;
 //        }
-//
-//        if(handshakeData.size() >= (Common.C0_LENGTH + Common.C1_LENGTH)){ // 服务端接收 c1 完毕，开始发送s2
-//            for(int i = 1;i <= 4; i++) {  //提取 c1 的 time
-//                S2.add(handshakeData.get(i));
-//            }
-//            int time = (int) (new Date().getTime() / 1000); //设置 s2 time
-//            byte[] timeByte = Common.intToByte(time);
-//            for(byte i : timeByte){
-//                S2.add(i);
-//            }
-//            for(int i = 8; i < Common.C1_LENGTH;i++) {
-//                S2.add(handshakeData.get(i));
-//            }
-//            ctx.writeAndFlush(Unpooled.copiedBuffer(Common.conversionByteArray(S2)));
-//        }
-//        if(handshakeData.size() >= Common.HANDSHAKE_LENGTH) {
-//            isHandshake = true;
-////            System.out.println("S1");
-////            byte[] s1 = Common.conversionByteArray(S1);
-////            System.out.println(s1.length);
-////            System.out.println(Common.bytes2hex(s1));;
-//////            byte[] s2 = Common.conversionByteArray(S2);
-//////            System.out.println("S2");
-//////            System.out.println(Common.bytes2hex(s2));
-////
-////            List<Byte> c1List = new ArrayList<Byte>();
-////            List<Byte> c2List = new ArrayList<Byte>();
-////
-////            for(int i = 1;i < 1537;i++ ) {
-////                c1List.add(handshakeData.get(i));
-////            }
-////            for(int i = 1537;i < handshakeData.size();i++) {
-////                c2List.add(handshakeData.get(i));
-////            }
-//
-////            System.out.println("接受到的握手数据");
-////            System.out.println(handshakeData.size());
-////            System.out.println("C1");
-////            System.out.println(Common.bytes2hex(Common.conversionByteArray(c1List)));
-////            System.out.println("C2");
-////            System.out.println(c2List.size());
-////            System.out.println(Common.bytes2hex(Common.conversionByteArray(c2List)));
-////
-////            System.out.println(Common.bytes2hex(Common.conversionByteArray(handshakeData)));
-//
-//        }
+//        ctx.writeAndFlush(Unpooled.copiedBuffer(Common.conversionByteArray(chunk)));
 //    }
 }
