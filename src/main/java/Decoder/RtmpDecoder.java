@@ -1,16 +1,15 @@
 package Decoder;
 
 import AMF.*;
+import User.Publish;
+import User.PublishGroup;
 import Util.Common;
 import Util.MsgType;
-import com.sun.corba.se.impl.ior.ByteBuffer;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.Unpooled;
-import io.netty.buffer.UnpooledByteBufAllocator;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.ByteToMessageDecoder;
-import org.omg.PortableInterceptor.SYSTEM_EXCEPTION;
 
 import java.util.*;
 
@@ -331,7 +330,12 @@ public class RtmpDecoder extends ByteToMessageDecoder {
     private void handFCpublish(AMFClass amfClass,double txid,ChannelHandlerContext ctx) {
         AMFUtil.load_amf(amfClass);
         String path = AMFUtil.load_amf_string(amfClass); //这个为发布的 url 协议
-
+        Publish client = PublishGroup.getChannel(path);
+        if(client == null) {
+            client = new Publish();
+            client.path = path;
+            client.publish = ctx;
+        }
         ByteBuf byteBuf = ByteBufAllocator.DEFAULT.buffer(1024);
         byteBuf.writeBytes(AMFUtil.writeString("onFCPublish"));
         byteBuf.writeBytes(AMFUtil.writeNumber(0.0));
