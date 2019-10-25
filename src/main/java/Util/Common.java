@@ -39,6 +39,9 @@ public class Common {
     public static int READ_CHUNK_LENGTH = 10240;//一次性读到 chunkdata 的数据长度
     public static String APP_NAME = "live";
 
+    public static byte FLV_KEY_FRAME = 0x01;
+    public static byte CONTROL_CLEAR_STREAM = 0x00;
+
     /**
      * int 转换 为 byte
      * @param val

@@ -15,6 +15,8 @@ import io.netty.handler.codec.ByteToMessageDecoder;
 
 import java.util.*;
 
+import static Util.Common.FLV_KEY_FRAME;
+
 public class RtmpDecoder extends ByteToMessageDecoder {
 
     //chunk head 数据
@@ -166,7 +168,7 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                     //System.out.println("streamId === " + streamId);
                 }
 
-                System.out.println("消息类型 === " + Integer.toHexString(this.msgType) + " msg len " + this.msgLength + " time " + timestamp +" head_len " + head_len + " streamId === " + streamId);
+//                System.out.println("消息类型 === " + Integer.toHexString(this.msgType) + " msg len " + this.msgLength + " time " + timestamp +" head_len " + head_len + " streamId === " + streamId);
 //                System.out.println("head mess " + Common.bytes2hex(headData) );
                 if(isExtendedTimestamp) {
                     byte[] timestampByte = new byte[Common.EXTEND_TIMESTAMP_LENGTH];
@@ -196,7 +198,7 @@ public class RtmpDecoder extends ByteToMessageDecoder {
             if(this.readMessageIndex < allMsglength){ //还没有提取完所有数据
                 msgLength = allMsglength - this.readMessageIndex;
             } else {
-                System.out.println("解析的数据" + this.allMessageData.length);
+//                System.out.println("解析的数据" + this.allMessageData.length);
                 handMessage(this.allMessageData,ctx);
 //                if(this.msgLength > 0) {
 //                    this.allMessageData = new byte[this.msgLength];
@@ -267,6 +269,7 @@ public class RtmpDecoder extends ByteToMessageDecoder {
         handData(MsgType.msg14,version,statusData,0,ctx);
 
         handResult(txid,MsgType.msg14,new byte[]{AMFUtil.writeNull()},new byte[]{AMFUtil.writeNull()},0,ctx);
+        byteBuf.release();
     }
 
     /**
@@ -318,10 +321,20 @@ public class RtmpDecoder extends ByteToMessageDecoder {
         version = new byte[length];
         byteBuf.readBytes(version);
         handData(MsgType.msg14,version,statusData,0,ctx);
+
 //
 //                    client->playing = true;
 //                    client->ready = false;
-//
+        Publish publish = PublishGroup.getChannel(path);
+        if(publish != null){
+            byteBuf.writeBytes(AMFUtil.writeString("onMetaData"));
+            byteBuf.writeBytes(AMFUtil.writeMixedArray(publish.MetaData));
+            byte[] resultData = new byte[byteBuf.readableBytes()];
+            byteBuf.readBytes(resultData);
+            sendData(resultData,MsgType.MSG_NOTIFY,streamId,ctx,0);
+        }
+        byteBuf.release();
+
 //                    if (publisher != NULL) {
 //                        Encoder notify;
 //                        amf_write(&notify, std::string("onMetaData"));
@@ -361,6 +374,7 @@ public class RtmpDecoder extends ByteToMessageDecoder {
         handData(MsgType.msg14,version,statusData,0,ctx);
 
         handResult(txid,MsgType.msg14,new byte[]{AMFUtil.writeNull()},new byte[]{AMFUtil.writeNull()},0,ctx);
+        byteBuf.release();
     }
 
     /**
@@ -389,7 +403,7 @@ public class RtmpDecoder extends ByteToMessageDecoder {
             status.put("description","Pausing.");
             byte[] statusData = AMFUtil.writeObject(status);
             handResult(txid,MsgType.msg14,version,statusData,0,ctx);
-
+            byteBuf.release();
 //            client->playing = false;
         } else {
             startPlayback(ctx);
@@ -448,22 +462,42 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                     String type = AMFUtil.load_amf_string(amfClass);
                     System.out.println(type);
                     Map<String,Object> data = AMFUtil.load_amf_mixedArray(amfClass);
-                    this.MetaData = data;
+                    Publish publish = PublishGroup.getChannel(this.path);
+                    if(publish != null) {
+                        publish.MetaData = data;
+                    }
+//                    this.MetaData = data;
                 }
             case 0x08:
                 List<Receive> list = ReceiveGroup.getChannel(this.path);
-                for(Receive receive: list){
-                    sendData(message,MsgType.MSGAUDIO,this.streamId,receive.receive);
+                if(list != null) {
+                    for(Receive receive: list){
+                        sendData(message,MsgType.MSG_AUDIO,this.streamId,receive.receive,this.timestamp);
+                    }
                 }
-//                FOR_EACH(std::vector<Client *>, i, clients) {
-//                Client *receiver = *i;
-//                if (receiver != NULL && receiver->ready) {
-//                    rtmp_send(receiver, MSG_AUDIO, STREAM_ID,
-//                            msg->buf, msg->timestamp);
-//                }
-//                 }
                 break;
             case 0x09:
+                byte flags = message[0];
+                List<Receive> listVideo = ReceiveGroup.getChannel(this.path);
+                if(listVideo != null) {
+                    for(Receive receive: listVideo){
+                        if (flags >> 4 == FLV_KEY_FRAME && !receive.ready) {
+                            System.out.println("flags ====== " +flags);
+                            ByteBuf byteBuf = ByteBufAllocator.DEFAULT.buffer(1024);
+                            byteBuf.writeByte(0x00);
+                            byteBuf.writeByte(0x00);
+                            byteBuf.writeBytes(Common.intToByte(strameId));
+                            byte[] control = new byte[byteBuf.readableBytes()];
+                            byteBuf.readBytes(control);
+                            sendData(control, MsgType.MSG_USER_CONTROL, 0, receive.receive,this.timestamp);
+                            receive.ready = true;
+                            byteBuf.release();
+                        }
+                        if(receive.ready) {
+                            sendData(message,MsgType.MSG_VIDEO,this.streamId,receive.receive,this.timestamp);
+                        }
+                    }
+                }
                 break;
             default:
                 break;
@@ -485,7 +519,8 @@ public class RtmpDecoder extends ByteToMessageDecoder {
         int length = byteBuf.readableBytes();
         byte[] data = new byte[length];
         byteBuf.readBytes(data);
-        sendData(data,msgType,streamId,ctx);
+        sendData(data,msgType,streamId,ctx,0);
+        byteBuf.release();
     }
 
     /**
@@ -508,7 +543,8 @@ public class RtmpDecoder extends ByteToMessageDecoder {
         int length = byteBuf.readableBytes();
         byte[] data = new byte[length];
         byteBuf.readBytes(data);
-        sendData(data,msgType,streamId,ctx);
+        sendData(data,msgType,streamId,ctx,0);
+        byteBuf.release();
     }
 
 
@@ -519,16 +555,17 @@ public class RtmpDecoder extends ByteToMessageDecoder {
      * @param streamId
      * @param ctx
      */
-    private void sendData(byte[] chunkData,byte msgType,int streamId,ChannelHandlerContext ctx) {
-        ByteBuf byteBuf = ByteBufAllocator.DEFAULT.buffer(128);
+    private void sendData(byte[] chunkData,byte msgType,int streamId,ChannelHandlerContext ctx,int timestamp) {
+        ByteBuf byteBuf = ByteBufAllocator.DEFAULT.buffer(1024);
         byte flags = (3 & 0x3f) | (0 << 6);
-        byte[] timestamp = {0x00,0x00,0x00};
+      //  byte[] timestamp = {0x00,0x00,0x00};
         int msg_len = chunkData.length;
         byte[] msgLength = Common.reverseArray(Common.intToByte24(msg_len));
         byte[] streamData = Common.intToByte(streamId);
 
         byteBuf.writeByte(flags);
-        byteBuf.writeBytes(timestamp);
+        System.out.println(Common.bytes2hex(Common.reverseArray(Common.intToByte24(timestamp))));
+        byteBuf.writeBytes(Common.reverseArray(Common.intToByte24(timestamp)));
         byteBuf.writeBytes(msgLength);
         byteBuf.writeByte(msgType);
         byteBuf.writeBytes(streamData);
@@ -556,6 +593,7 @@ public class RtmpDecoder extends ByteToMessageDecoder {
         byte[] sendData = new byte[sendLength];
         byteBuf.readBytes(sendData);
         ctx.writeAndFlush(Unpooled.copiedBuffer(sendData));
+        byteBuf.release();
     }
 
     /**
