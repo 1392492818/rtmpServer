@@ -3,6 +3,8 @@ package Decoder;
 import AMF.*;
 import User.Publish;
 import User.PublishGroup;
+import User.Receive;
+import User.ReceiveGroup;
 import Util.Common;
 import Util.MsgType;
 import io.netty.buffer.ByteBuf;
@@ -59,6 +61,8 @@ public class RtmpDecoder extends ByteToMessageDecoder {
     private List<Byte> S1 = new ArrayList<Byte>();
     private List<Byte> S2 = new ArrayList<Byte>();
     private byte[] zero = {0x00,0x00,0x00,0x00};
+
+    private String path = null;
 
     private Map<String,Object> MetaData = null;
     @Override
@@ -274,12 +278,17 @@ public class RtmpDecoder extends ByteToMessageDecoder {
     private void handPlay(AMFClass amfClass,double txid,ChannelHandlerContext ctx) {
         AMFUtil.load_amf(amfClass);
         String path = AMFUtil.load_amf_string(amfClass); //这个为发布的 url 协议
+        this.path = path;
         System.out.println(path);
-        startPalyback(ctx);
+        Receive receive = new Receive();
+        receive.receive = ctx;
+        receive.playing = true;
+        ReceiveGroup.setChannel(path,receive);
+        startPlayback(ctx);
         handResult(txid,MsgType.msg14,new byte[]{AMFUtil.writeNull()},new byte[]{AMFUtil.writeNull()},0,ctx);
     }
 
-    private void startPalyback(ChannelHandlerContext ctx) {
+    private void startPlayback(ChannelHandlerContext ctx) {
         ByteBuf byteBuf = ByteBufAllocator.DEFAULT.buffer(1024);
         byteBuf.writeBytes(AMFUtil.writeString("onStatus"));
         byteBuf.writeBytes(AMFUtil.writeNumber(0.0));
@@ -330,6 +339,7 @@ public class RtmpDecoder extends ByteToMessageDecoder {
     private void handFCpublish(AMFClass amfClass,double txid,ChannelHandlerContext ctx) {
         AMFUtil.load_amf(amfClass);
         String path = AMFUtil.load_amf_string(amfClass); //这个为发布的 url 协议
+        this.path = path;
         Publish client = PublishGroup.getChannel(path);
         if(client == null) {
             client = new Publish();
@@ -382,7 +392,7 @@ public class RtmpDecoder extends ByteToMessageDecoder {
 
 //            client->playing = false;
         } else {
-            startPalyback(ctx);
+            startPlayback(ctx);
         }
         handResult(txid,MsgType.msg14,new byte[]{AMFUtil.writeNull()},new byte[]{AMFUtil.writeNull()},0,ctx);
     }
@@ -432,8 +442,6 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                 }
                 break;
             case 0x12: //设置一些元信息
-
-
                 String command  = AMFUtil.load_amf_string(amfClass);
                 System.out.println(command);
                 if(command.equals("@setDataFrame")){
@@ -442,6 +450,21 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                     Map<String,Object> data = AMFUtil.load_amf_mixedArray(amfClass);
                     this.MetaData = data;
                 }
+            case 0x08:
+                List<Receive> list = ReceiveGroup.getChannel(this.path);
+                for(Receive receive: list){
+                    sendData(message,MsgType.MSGAUDIO,this.streamId,receive.receive);
+                }
+//                FOR_EACH(std::vector<Client *>, i, clients) {
+//                Client *receiver = *i;
+//                if (receiver != NULL && receiver->ready) {
+//                    rtmp_send(receiver, MSG_AUDIO, STREAM_ID,
+//                            msg->buf, msg->timestamp);
+//                }
+//                 }
+                break;
+            case 0x09:
+                break;
             default:
                 break;
         }
