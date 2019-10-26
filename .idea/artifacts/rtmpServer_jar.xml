@@ -1,0 +1,10 @@
+<component name="ArtifactManager">
+  <artifact type="jar" name="rtmpServer:jar">
+    <output-path>$PROJECT_DIR$/out/artifacts/rtmpServer_jar</output-path>
+    <root id="archive" name="rtmpServer.jar">
+      <element id="module-output" name="rtmpServer" />
+      <element id="extracted-dir" path="$MAVEN_REPOSITORY$/io/netty/netty-all/4.1.42.Final/netty-all-4.1.42.Final.jar" path-in-jar="/" />
+      <element id="extracted-dir" path="$MAVEN_REPOSITORY$/org/jboss/netty/netty/3.2.10.Final/netty-3.2.10.Final.jar" path-in-jar="/" />
+    </root>
+  </artifact>
+</component>

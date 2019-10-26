@@ -23,6 +23,7 @@ public class RtmpDecoder extends ByteToMessageDecoder {
     private List<Byte> chunkData = new ArrayList<Byte>(); // chunk所有数据， 包含 header
     private int chunkHeadIndex = 0; //byte head 提取的下标
     private int timestamp = 0; // 时间戳
+    private int sendTimestamp = 0;
     private int msgLength = 0; //整个chunk数据长度，不包含 header
     private int allMsglength = 0;
     private byte msgType; //消息类型
@@ -121,6 +122,7 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                         headData.add(i);
                     }
                     int ts  =  Common.byteToInt24(timestampByte);
+                    sendTimestamp = ts;
                     if(timeMap.containsKey(csid)) { //如果存在那么 拿出之前的时间戳
                         if(head_len < 12) {
                             ts += timeMap.get(csid);
@@ -282,11 +284,6 @@ public class RtmpDecoder extends ByteToMessageDecoder {
         AMFUtil.load_amf(amfClass);
         String path = AMFUtil.load_amf_string(amfClass); //这个为发布的 url 协议
         this.path = path;
-        System.out.println(path);
-        Receive receive = new Receive();
-        receive.receive = ctx;
-        receive.playing = true;
-        ReceiveGroup.setChannel(path,receive);
         startPlayback(ctx);
         handResult(txid,MsgType.msg14,new byte[]{AMFUtil.writeNull()},new byte[]{AMFUtil.writeNull()},0,ctx);
     }
@@ -321,7 +318,12 @@ public class RtmpDecoder extends ByteToMessageDecoder {
         version = new byte[length];
         byteBuf.readBytes(version);
         handData(MsgType.msg14,version,statusData,0,ctx);
-
+        System.out.println(path);
+        Receive receive = new Receive();
+        receive.receive = ctx;
+        receive.playing = true;
+        receive.ready = false;
+        ReceiveGroup.setChannel(path,receive);
 //
 //                    client->playing = true;
 //                    client->ready = false;
@@ -334,13 +336,6 @@ public class RtmpDecoder extends ByteToMessageDecoder {
             sendData(resultData,MsgType.MSG_NOTIFY,streamId,ctx,0);
         }
         byteBuf.release();
-
-//                    if (publisher != NULL) {
-//                        Encoder notify;
-//                        amf_write(&notify, std::string("onMetaData"));
-//                        amf_write_ecma(&notify, metadata);
-//                        rtmp_send(client, MSG_NOTIFY, STREAM_ID, notify.buf);
-//                    }
     }
 
     /**
@@ -421,6 +416,10 @@ public class RtmpDecoder extends ByteToMessageDecoder {
         amfClass.message = message;
         amfClass.pos = 0;
         switch (msgType) {
+            case 0x01:
+                System.err.println("chunk set size");
+            case 0x03:
+                System.err.println("协议控制信息");
             case 0x14:
                 //  System.out.println("消息控制服务");
                 String msg = AMFUtil.load_amf_string(amfClass);
@@ -469,19 +468,24 @@ public class RtmpDecoder extends ByteToMessageDecoder {
 //                    this.MetaData = data;
                 }
             case 0x08:
+               // System.err.println("音频" + message.length);
                 List<Receive> list = ReceiveGroup.getChannel(this.path);
                 if(list != null) {
                     for(Receive receive: list){
-                        sendData(message,MsgType.MSG_AUDIO,this.streamId,receive.receive,this.timestamp);
+                        int timestamp = timeMap.get(this.csid);
+                        if(receive.ready) {
+                            sendData(message,MsgType.MSG_AUDIO,this.streamId,receive.receive,timestamp);
+                        }
                     }
                 }
                 break;
             case 0x09:
+                //System.err.println("视频" + message.length);
                 byte flags = message[0];
                 List<Receive> listVideo = ReceiveGroup.getChannel(this.path);
                 if(listVideo != null) {
                     for(Receive receive: listVideo){
-                        if (flags >> 4 == FLV_KEY_FRAME && !receive.ready) {
+                        if (flags >> 4 == FLV_KEY_FRAME && receive.playing) {
                             System.out.println("flags ====== " +flags);
                             ByteBuf byteBuf = ByteBufAllocator.DEFAULT.buffer(1024);
                             byteBuf.writeByte(0x00);
@@ -489,12 +493,14 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                             byteBuf.writeBytes(Common.intToByte(strameId));
                             byte[] control = new byte[byteBuf.readableBytes()];
                             byteBuf.readBytes(control);
-                            sendData(control, MsgType.MSG_USER_CONTROL, 0, receive.receive,this.timestamp);
+                            sendData(control, MsgType.MSG_USER_CONTROL, 0, receive.receive,0);
                             receive.ready = true;
                             byteBuf.release();
                         }
                         if(receive.ready) {
-                            sendData(message,MsgType.MSG_VIDEO,this.streamId,receive.receive,this.timestamp);
+                            int timestamp = timeMap.get(this.csid);
+                            //System.out.println("时间戳" + timestamp);
+                            sendData(message,MsgType.MSG_VIDEO,this.streamId,receive.receive,timestamp);
                         }
                     }
                 }
@@ -557,14 +563,19 @@ public class RtmpDecoder extends ByteToMessageDecoder {
      */
     private void sendData(byte[] chunkData,byte msgType,int streamId,ChannelHandlerContext ctx,int timestamp) {
         ByteBuf byteBuf = ByteBufAllocator.DEFAULT.buffer(1024);
-        byte flags = (3 & 0x3f) | (0 << 6);
+        byte flags;
+        if(this.strameId == Common.STREAM_ID) {
+            flags = (4 & 0x3f) | (0 << 6);
+        } else {
+            flags = (3 & 0x3f) | (0 << 6);
+        }
       //  byte[] timestamp = {0x00,0x00,0x00};
         int msg_len = chunkData.length;
         byte[] msgLength = Common.reverseArray(Common.intToByte24(msg_len));
         byte[] streamData = Common.intToByte(streamId);
 
         byteBuf.writeByte(flags);
-        System.out.println(Common.bytes2hex(Common.reverseArray(Common.intToByte24(timestamp))));
+      //  System.out.println(Common.bytes2hex(Common.reverseArray(Common.intToByte24(timestamp))));
         byteBuf.writeBytes(Common.reverseArray(Common.intToByte24(timestamp)));
         byteBuf.writeBytes(msgLength);
         byteBuf.writeByte(msgType);
@@ -585,14 +596,32 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                 for(int i = pos; i < pos + 128;i++) {
                     byteBuf.writeByte(chunkData[i]);
                 }
-                byteBuf.writeByte((byte) ((3 & 0x3f) | (3 << 6)));
+                if(this.strameId == Common.STREAM_ID) {
+                    byteBuf.writeByte((byte) ((4 & 0x3f) | (3 << 6)));
+
+                } else {
+                    byteBuf.writeByte((byte) ((3 & 0x3f) | (3 << 6)));
+                }
+
             }
             pos += Common.DEFAULT_CHUNK_MESSAGE_LENGTH;
         }
         int sendLength = byteBuf.readableBytes();
-        byte[] sendData = new byte[sendLength];
+        double index = Math.floor(sendLength / 4096);
+        System.out.println(index);
+        byte[] sendData;
+        for(int i = 0; i < index;i++) {
+            sendData = new byte[4096];
+            byteBuf.readBytes(sendData);
+            System.out.println("发送数据长度" + sendData.length);
+            ctx.writeAndFlush(Unpooled.copiedBuffer(sendData));
+        }
+        sendLength = byteBuf.readableBytes();
+        sendData = new byte[sendLength];
         byteBuf.readBytes(sendData);
+        System.out.println("发送数据长度" + sendData.length);
         ctx.writeAndFlush(Unpooled.copiedBuffer(sendData));
+
         byteBuf.release();
     }
 
