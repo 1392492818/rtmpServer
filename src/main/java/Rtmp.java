@@ -34,10 +34,10 @@ public class Rtmp {
                         @Override
                         protected void initChannel(SocketChannel socketChannel) throws Exception {
                             socketChannel.pipeline().addLast(new RtmpDecoder());
-                            socketChannel.pipeline().addLast(new ObjectEncoder());
                             socketChannel.pipeline().addLast(new RtmpHandler());
                         }
-                    });
+                    })
+                    .option(ChannelOption.RCVBUF_ALLOCATOR, new FixedRecvByteBufAllocator(131070));
             Channel ch = serverBootstrap.bind(port).sync().channel();
 
             ch.closeFuture().sync();
