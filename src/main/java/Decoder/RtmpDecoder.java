@@ -66,8 +66,11 @@ public class RtmpDecoder extends ByteToMessageDecoder {
     private byte[] zero = {0x00,0x00,0x00,0x00};
 
     private String path = null;
+    private int chunkLength = Common.DEFAULT_CHUNK_MESSAGE_LENGTH;
 
     private Map<String,Object> MetaData = null;
+
+    private ByteBuf streamByteBuf = ByteBufAllocator.DEFAULT.buffer(1024);
     @Override
 
 
@@ -183,7 +186,7 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                 }
             }
 
-            int msgIndex = msgLength > Common.DEFAULT_CHUNK_MESSAGE_LENGTH ?  Common.DEFAULT_CHUNK_MESSAGE_LENGTH :  msgLength;
+            int msgIndex = msgLength > chunkLength ? chunkLength :  msgLength;
             if(byteBuf.readableBytes() < msgIndex){  //如果不够，需要等到数据足够再读取
                 //    System.err.println("数据不足了");
                 lackMessage = true;
@@ -421,7 +424,19 @@ public class RtmpDecoder extends ByteToMessageDecoder {
             case 0x01:
                 System.err.println("chunk set size");
             case 0x03:
-                System.err.println("协议控制信息");
+                System.err.println("msg_set_chunk");
+
+                if (amfClass.pos + 4 > amfClass.message.length) {
+                    System.out.println("数据不足");
+                }
+                byte[] number = new byte[4];
+                int index = 0;
+                for(int i = amfClass.pos; i < amfClass.pos + 4;i++) {
+                    number[index] = amfClass.message[i];
+                    index++;
+                }
+                chunkLength = Common.byteToInt(number);
+                System.out.println(Common.byteToInt(number));
             case 0x14:
                 //  System.out.println("消息控制服务");
                 String msg = AMFUtil.load_amf_string(amfClass);
@@ -477,7 +492,7 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                         if(receive.ready) {
                             int timestamp = timeMap.get(this.csid);
                             System.out.println("audio发送数据 ===" + message.length  +" 时间戳" + timestamp);
-                           // sendData(message,MsgType.MSG_AUDIO,1337,receive.receive,timestamp);
+                            sendData(message,MsgType.MSG_AUDIO,1337,receive.receive,timestamp);
                         }
                     }
                 }
@@ -513,6 +528,9 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                 }
                 break;
             default:
+                System.out.println(this.msgType);
+                System.out.println(Common.bytes2hex(message));
+                System.out.println("有其他东西过来了");
                 break;
         }
     }
@@ -592,7 +610,7 @@ public class RtmpDecoder extends ByteToMessageDecoder {
             if(byteBuf.writableBytes() < chunkData.length) {
                 byteBuf.ensureWritable(chunkData.length);
             }
-            if(chunkData.length - pos < Common.DEFAULT_CHUNK_MESSAGE_LENGTH){
+            if(chunkData.length - pos < chunkLength){
                 for(int i = pos; i < chunkData.length;i++){
                     byteBuf.writeByte(chunkData[i]);
                 }
@@ -611,7 +629,7 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                 }
 
             }
-            pos += Common.DEFAULT_CHUNK_MESSAGE_LENGTH;
+            pos += chunkLength;
         }
         int sendLength = byteBuf.readableBytes();
         double index = Math.floor(sendLength / 1024);
@@ -630,9 +648,79 @@ public class RtmpDecoder extends ByteToMessageDecoder {
 //        byte[] sendData = new byte[sendLength];
 //        byteBuf.readBytes(sendData);
         ctx.writeAndFlush(Unpooled.copiedBuffer(sendData));
-
+        if(chunkData.length == 399) {
+            System.out.println(Common.bytes2hex(sendData));
+        }
         byteBuf.release();
     }
+
+    /**
+     * 同意数据发送
+     * @param chunkData
+     * @param msgType
+     * @param streamId
+     * @param ctx
+     */
+    private void sendData2(byte[] chunkData,byte msgType,int streamId,ChannelHandlerContext ctx,int timestamp) {
+        byte flags;
+        if(streamId == Common.STREAM_ID) {
+            flags = (4 & 0x3f) | (0 << 6);
+        } else {
+            flags = (3 & 0x3f) | (0 << 6);
+        }
+        //  byte[] timestamp = {0x00,0x00,0x00};
+        int msg_len = chunkData.length;
+        byte[] msgLength = Common.reverseArray(Common.intToByte24(msg_len));
+        byte[] streamData = Common.intToByte(streamId);
+        streamByteBuf.writeByte(flags);
+        //  System.out.println(Common.bytes2hex(Common.reverseArray(Common.intToByte24(timestamp))));
+        streamByteBuf.writeBytes(Common.reverseArray(Common.intToByte24(timestamp)));
+        streamByteBuf.writeBytes(msgLength);
+        streamByteBuf.writeByte(msgType);
+        streamByteBuf.writeBytes(streamData);
+        int pos = 0;
+
+        while(pos < chunkData.length){
+            if(streamByteBuf.writableBytes() < chunkData.length) {
+                streamByteBuf.ensureWritable(chunkData.length);
+            }
+            if(chunkData.length - pos < chunkLength){
+                for(int i = pos; i < chunkData.length;i++){
+                    streamByteBuf.writeByte(chunkData[i]);
+                }
+            } else {
+                if(streamByteBuf.writableBytes() < pos + 128) {
+                    streamByteBuf.ensureWritable(pos + 128);
+                }
+                for(int i = pos; i < pos + 128;i++) {
+                    streamByteBuf.writeByte(chunkData[i]);
+                }
+
+                if(streamId == Common.STREAM_ID) {
+                    streamByteBuf.writeByte((byte) ((4 & 0x3f) | (3 << 6)));
+                } else {
+                    streamByteBuf.writeByte((byte) ((3 & 0x3f) | (3 << 6)));
+                }
+
+            }
+            pos += chunkLength;
+        }
+        sendClient(ctx);
+    }
+
+    private void sendClient(ChannelHandlerContext ctx) {
+        System.out.println("进来了");
+        if(streamByteBuf.readableBytes() > 0) {
+            int length = streamByteBuf.readableBytes();
+            //if(length > 4096) length = 4096;
+            System.out.println("进来了2" + length);
+            byte[] sendData = new byte[length];
+            streamByteBuf.readBytes(sendData);
+            ctx.writeAndFlush(Unpooled.copiedBuffer(sendData));
+        }
+    }
+
+
 
     /**
      * 根据csidTS 获取 basic head 长度
@@ -737,7 +825,7 @@ public class RtmpDecoder extends ByteToMessageDecoder {
 //        }
 //        int pos = 0;
 //        while(pos < chunkData.size()){
-//            if(chunkData.size() - pos < Common.DEFAULT_CHUNK_MESSAGE_LENGTH){
+//            if(chunkData.size() - pos < chunkLength){
 //                for(int i = pos; i < chunkData.size();i++){
 //                    chunk.add(chunkData.get(i));
 //                }
@@ -747,7 +835,7 @@ public class RtmpDecoder extends ByteToMessageDecoder {
 //                }
 //                chunk.add((byte) ((3 & 0x3f) | (3 << 6)));
 //            }
-//            pos += Common.DEFAULT_CHUNK_MESSAGE_LENGTH;
+//            pos += chunkLength;
 //        }
 //        ctx.writeAndFlush(Unpooled.copiedBuffer(Common.conversionByteArray(chunk)));
 //    }
