@@ -35,6 +35,14 @@ public class ReceiveGroup {
     }
 
     /**
+     * 设置 channel
+     * @param path
+     */
+    public synchronized static void setChannel(String path,List<Receive> list) {
+        channel.put(path,list);
+    }
+
+    /**
      * 获取 channel
      * @param path
      * @return

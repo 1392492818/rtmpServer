@@ -223,7 +223,6 @@ public class RtmpDecoder extends ByteToMessageDecoder {
             e.printStackTrace();
             System.err.println(Common.bytes2hex(Common.conversionByteArray(chunkData)));
         }
-
     }
 
     /**
@@ -333,6 +332,8 @@ public class RtmpDecoder extends ByteToMessageDecoder {
 //                    client->ready = false;
         Publish publish = PublishGroup.getChannel(path);
         if(publish != null){
+            System.out.println("keyframe");
+            receive.keyframe = false;
             byteBuf.writeBytes(AMFUtil.writeString("onMetaData"));
             byteBuf.writeBytes(AMFUtil.writeMixedArray(publish.MetaData));
             byte[] resultData = new byte[byteBuf.readableBytes()];
@@ -352,12 +353,11 @@ public class RtmpDecoder extends ByteToMessageDecoder {
         AMFUtil.load_amf(amfClass);
         String path = AMFUtil.load_amf_string(amfClass); //这个为发布的 url 协议
         this.path = path;
-        Publish client = PublishGroup.getChannel(path);
-        if(client == null) {
-            client = new Publish();
-            client.path = path;
-            client.publish = ctx;
-        }
+        Publish client  = new Publish();
+        client.path = path;
+        client.publish = ctx;
+
+        PublishGroup.setChannel(path,client);
         ByteBuf byteBuf = ByteBufAllocator.DEFAULT.buffer(1024);
         byteBuf.writeBytes(AMFUtil.writeString("onFCPublish"));
         byteBuf.writeBytes(AMFUtil.writeNumber(0.0));
@@ -423,7 +423,6 @@ public class RtmpDecoder extends ByteToMessageDecoder {
         switch (msgType) {
             case 0x01:
                 System.err.println("msg_set_chunk");
-
                 if (amfClass.pos + 4 > amfClass.message.length) {
                     System.out.println("数据不足");
                 }
@@ -437,7 +436,7 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                 chunkLength = Common.byteToInt(number);
                 System.out.println(Common.byteToInt(number));
             case 0x03:
-                System.err.println("read byte");
+               // System.err.println("read byte");
 
                 if (amfClass.pos + 4 > amfClass.message.length) {
                     System.out.println("数据不足");
@@ -450,7 +449,7 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                     index2++;
                 }
                 int len = Common.byteToInt(number2);
-                System.out.println("len" + len);
+               // System.out.println("len" + len);
             case 0x14:
                 //  System.out.println("消息控制服务");
                 String msg = AMFUtil.load_amf_string(amfClass);
@@ -461,8 +460,12 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                     if(msg.equals("connect")) {
                         Map<String,Object> data = AMFUtil.load_amf_object(amfClass);
                         if(data.containsKey("app")) {
+                            System.out.println(data.toString());
                             String app = data.get("app").toString();
+                            System.out.println(app);
                             if(app.equals(Common.APP_NAME)){
+                                System.out.println("进来了???");
+                                System.out.println(this.streamId);
                                 handConnect(txid,ctx);
                             }
                         }
@@ -503,9 +506,9 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                 List<Receive> list = ReceiveGroup.getChannel(this.path);
                 if(list != null) {
                     for(Receive receive: list){
-                        if(receive.ready) {
+                        if(receive.ready && receive.keyframe) {
                             int timestamp = timeMap.get(this.csid);
-                            System.out.println("audio发送数据 ===" + message.length  +" 时间戳" + timestamp);
+                           // System.out.println("audio发送数据 ===" + message.length  +" 时间戳" + timestamp);
                             sendData2(message,MsgType.MSG_AUDIO,1337,receive.receive,timestamp);
                         }
                     }
@@ -514,6 +517,14 @@ public class RtmpDecoder extends ByteToMessageDecoder {
             case 0x09:
                 //System.err.println("视频" + message.length);
                 byte flags = message[0];
+//                System.out.println("=======================");
+//                System.out.println(Common.bytes2hex(message));
+//                System.out.println("=======================");
+                Publish publish = PublishGroup.getChannel(path);
+                if(!publish.keyFrame) {
+                   publish.keyFrame = true;
+                   publish.keyFrameMessage = message;
+                }
                 List<Receive> listVideo = ReceiveGroup.getChannel(this.path);
                 if(listVideo != null) {
                     for(Receive receive: listVideo){
@@ -530,21 +541,25 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                                 receive.ready = true;
                                 byteBuf.release();
                             }
-                            if(receive.ready) {
+                            if(!receive.keyframe) {
+                                System.out.println("关键进来了");
+                                receive.keyframe = true;
+                                sendData2(publish.keyFrameMessage,MsgType.MSG_VIDEO,1337,receive.receive,timestamp);
+                            }
+                            if(receive.ready && receive.keyframe) {
                                 int timestamp = timeMap.get(this.csid);
                                 //System.out.println("时间戳" + timestamp);
-                                System.out.println("video发送数据 ===" + message.length +" 时间戳" + timestamp);
+                               // System.out.println("video发送数据 ===" + message.length +" 时间戳" + timestamp);
                                 sendData2(message,MsgType.MSG_VIDEO,1337,receive.receive,timestamp);
                             }
                         }
-
                     }
                 }
                 break;
             default:
                 System.out.println(this.msgType);
                 System.out.println(Common.bytes2hex(message));
-                System.out.println("有其他东西过来了");
+              //  System.out.println("有其他东西过来了");
                 break;
         }
     }
@@ -647,9 +662,6 @@ public class RtmpDecoder extends ByteToMessageDecoder {
         byte[] sendData = new byte[sendLength];
         byteBuf.readBytes(sendData);
         ctx.writeAndFlush(Unpooled.copiedBuffer(sendData));
-        //if(chunkData.length == 391) {
-            System.out.println(Common.bytes2hex(sendData));
-       // }
         byteBuf.release();
     }
 
@@ -701,8 +713,6 @@ public class RtmpDecoder extends ByteToMessageDecoder {
                         streamByteBuf.writeByte((byte) ((3 & 0x3f) | (3 << 6)));
                     }
                 }
-
-
             }
             pos += chunkLength;
         }
@@ -795,7 +805,17 @@ public class RtmpDecoder extends ByteToMessageDecoder {
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        System.err.println("错误信息");
         System.out.println(cause.getMessage());
+        List<Receive> listVideo = ReceiveGroup.getChannel(this.path);
+        List<Receive> newListVideo = new ArrayList<Receive>();
+        for(int i = 0; i < listVideo.size(); i++) {
+            Receive receive = listVideo.get(i);
+            if(receive.receive != ctx) {
+                newListVideo.add(receive);
+            }
+        }
+        ReceiveGroup.setChannel(this.path,newListVideo);
         super.exceptionCaught(ctx, cause);
     }
 

@@ -6,4 +6,5 @@ public class Receive {
     public boolean playing = false;
     public ChannelHandlerContext receive;
     public boolean ready = false;
+    public boolean keyframe = true;
 }

@@ -9,4 +9,7 @@ public class Publish {
     public String path;
     public ChannelHandlerContext publish;
     public Map<String,Object> MetaData;
+    public boolean keyFrame = false;
+    public byte[] keyFrameMessage = null;
+
 }
