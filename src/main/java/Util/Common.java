@@ -1,5 +1,7 @@
 package Util;
 
+import java.io.IOException;
+import java.io.RandomAccessFile;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -56,6 +58,35 @@ public class Common {
         return b;
     }
 
+    public static void appendMethodA(String fileName, byte[] content) {
+
+        try {
+
+            // 打开一个随机访问文件流，按读写方式
+
+            RandomAccessFile randomFile = new RandomAccessFile(fileName, "rw");
+
+            // 文件长度，字节数
+
+            long fileLength = randomFile.length();
+
+            // 将写文件指针移到文件尾。
+
+            randomFile.seek(fileLength);
+
+            randomFile.write(content);
+
+            randomFile.close();
+
+        } catch (IOException e) {
+
+            e.printStackTrace();
+
+        }
+
+    }
+
+
     /**
      * int 转换 为 byte
      * @param val
@@ -85,6 +116,15 @@ public class Common {
      */
     public static int byteToInt24(byte[] bytes) {
         return  0x00 << 24| (bytes[0] & 0xff) << 16 | (bytes[1] & 0xff) << 8 | bytes[2] & 0xff;
+    }
+
+    /**
+     * 24 byte
+     * @param bytes
+     * @return
+     */
+    public static int byteBigToInt16(byte[] bytes) {
+        return  0x00 << 24| (bytes[0] & 0xff) << 16 | (bytes[0] & 0xff) << 8 | bytes[1] & 0xff;
     }
 
     /**
@@ -236,6 +276,20 @@ public class Common {
               // 删除元素后，需要把下标减一。这是因为在每次删除元素后，ArrayList会将后面部分的元素依次往上挪一个位置(就是copy)，所以，下一个需要访问的下标还是当前下标，所以必须得减一才能把所有元素都遍历完
         }
         return newData;
+    }
+
+
+    public static byte[] CreateADTS(AudioSpecificConfig audioSpecificConfig,int packLength) {
+        byte[] adts = new byte[7];
+        int chanCfg = audioSpecificConfig.nChannels;
+        adts[0] = (byte) 0xFF;
+        adts[1] = (byte)0xF1;
+        adts[2] = (byte)(((audioSpecificConfig.nAudioObjectType - 1) << 6) + (audioSpecificConfig.nSampleFrequencyIndex << 2) + (chanCfg >> 2));
+        adts[3] = (byte)(((chanCfg & 3) << 6) + (packLength >> 11));
+        adts[4] = (byte)((packLength & 0x7FF) >> 3);
+        adts[5] = (byte) (((packLength & 0x7) << 5)|0x1f);
+        adts[6] = (byte)0xFC;
+        return adts;
     }
 
 }
