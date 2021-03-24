@@ -45,7 +45,7 @@ public class AudioStreamDecoder {
                 System.out.println("nSampleFrequencyIndex" + ascAudioSpecificConfig.nSampleFrequencyIndex);
                 System.out.println("nChannels" + ascAudioSpecificConfig.nChannels);
 //                Common.appendMethodA("D:\\fuweicong.aac",Common.CreateADTS(ascAudioSpecificConfig,packet.length));
-//                Common.appendMethodA("D:\\fuweicong.aac",packet);
+//                Common.appendMethodA("D:\\fuweicong.aac",packet); // 错误
             } else {
                 Common.appendMethodA("D:\\fuweicong.aac",Common.CreateADTS(ascAudioSpecificConfig,packet.length + 7));
                 Common.appendMethodA("D:\\fuweicong.aac",packet);

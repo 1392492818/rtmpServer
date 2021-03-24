@@ -21,7 +21,7 @@ public class VideoStreamDecoder {
     private byte[] ppsLength; //2 byte pps长度
     private byte[] ppsData; // pps 内容 pictureParameterSetNALUnits
     private byte[] message;
-    private int index = 0; //程序计算的下表
+    private int index = 0; //程序计算的下标
     public VideoStreamDecoder(byte[] data) {
         this.message = data;
         this.streamType = this.message[index++];
@@ -49,7 +49,7 @@ public class VideoStreamDecoder {
         int spsLength = Common.byteBigToInt16(this.spsLength);
         this.spsData = new byte[spsLength];
         if(spsLength > this.message.length - index){
-//            System.out.println("sps数据长度有问题");
+            System.out.println("sps数据长度有问题");
             return;
         }
         for(int i = 0;i < spsLength;i++) {
@@ -68,10 +68,10 @@ public class VideoStreamDecoder {
         }
 //        System.out.println("pps length" + ppsLength +" message length " + message.length + " index " + index);
 //
-//        Common.appendMethodA("D:\\test2.h264",new byte[]{0x00,0x00,0x00,0x01});
-//        Common.appendMethodA("D:\\test2.h264",spsData);
-//        Common.appendMethodA("D:\\test2.h264",new byte[]{0x00,0x00,0x01});
-//        Common.appendMethodA("D:\\test2.h264",ppsData);
+        Common.appendMethodA("D:\\test2.h264",new byte[]{0x00,0x00,0x00,0x01});
+        Common.appendMethodA("D:\\test2.h264",spsData);
+        Common.appendMethodA("D:\\test2.h264",new byte[]{0x00,0x00,0x01});
+        Common.appendMethodA("D:\\test2.h264",ppsData);
     }
 
     private void H264NALUDecoder() {
@@ -82,10 +82,10 @@ public class VideoStreamDecoder {
             for(int i = 0;i < len;i++) {
                 nalu[i] = this.message[index++];
             }
-//            Common.appendMethodA("D:\\test2.h264",new byte[]{0x00,0x00,0x01});
-////            Common.appendMethodA("D:\\test2.h264",naluLength);
-//
-//            Common.appendMethodA("D:\\test2.h264",nalu);
+            Common.appendMethodA("D:\\test2.h264",new byte[]{0x00,0x00,0x01});
+//            Common.appendMethodA("D:\\test2.h264",naluLength);
+
+            Common.appendMethodA("D:\\test2.h264",nalu);
         }
     }
 

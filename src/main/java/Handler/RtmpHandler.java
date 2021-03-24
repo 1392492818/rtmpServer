@@ -16,6 +16,5 @@ public class RtmpHandler extends ChannelInboundHandlerAdapter {
         super.channelRead(ctx, msg);
         byte[] data = (byte[]) msg;
         ctx.writeAndFlush(Unpooled.copiedBuffer(data));
-
     }
 }

@@ -357,7 +357,7 @@ public class AMFUtil {
             amfData.put(key,value);
 //            System.out.println(key +"==="+value);
         }
-        System.out.println(amfClass.pos);
+        //System.out.println(amfClass.pos);
         amfClass.pos += 1;// object 最后 结束为 00 00 09 取到最后是00 所以 +1 跳过 09 这个 字节
         return amfData;
     }
